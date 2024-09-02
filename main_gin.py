@@ -1,0 +1,257 @@
+from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
+from ogb.graphproppred.mol_encoder import AtomEncoder
+from prep_pcba_577.prep import convert_aid_577_into_ogb_dataset
+
+import torch
+import torch_geometric
+from torch_geometric.nn.norm import InstanceNorm, GraphNorm
+from torch_geometric.nn import GINConv, global_add_pool
+from torch_geometric.loader import DataLoader
+from torch_geometric.nn.models import MLP
+
+import pandas as pd
+import copy
+import numpy as np
+import random
+from tqdm import tqdm
+import pickle
+
+import argparse
+
+argparser = argparse.ArgumentParser()
+argparser.add_argument("--device", type=str, default='cpu')
+argparser.add_argument("--num_layers", type=int, default=2)
+argparser.add_argument("--hidden_dim", type=int, default=56)
+argparser.add_argument("--learning_rate", type=float, default=0.001)
+argparser.add_argument("--dropout_p", type=float, default=0.5)
+argparser.add_argument("--epochs", type=int, default=120)
+argparser.add_argument("--batch_size", type=int, default=32)
+argparser.add_argument("--weight_decay", type=float, default=1e-6)
+#argparser.add_argument("--random_seed", type=int, default=1)
+#argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
+args = argparser.parse_args()
+
+meta_dict = convert_aid_577_into_ogb_dataset()
+dataset = PygGraphPropPredDataset(name="ogbg-pcba-aid-577", root="local", transform=None, meta_dict=meta_dict)
+evaluator = Evaluator(name="ogbg-molhiv") # intentionally use ogbg-molhiv evaluator for ogbg-pcba-aid-577 since we have put data in same format (single task, binary output molecular/graph property prediction)
+
+config = {
+ 'device': args.device,
+ # must be valid ogb dataset id, e.g. ogbg-molhiv, ogbg-molpcba, etc
+ 'dataset_id': 'ogbg-pcba-aid-577',
+ 'num_layers': args.num_layers, # 2
+ 'hidden_dim': args.hidden_dim, # 56
+ 'dropout': args.dropout_p, # 0.50
+ 'learning_rate': args.learning_rate, # 0.001
+ 'epochs': args.epochs, # 120, this problem may need more time than ogbg-molhiv
+ 'batch_size': args.batch_size,# 32
+ 'weight_decay': args.weight_decay # 1e-6
+}
+device = config["device"]
+
+# note these splits are randomized each time right now, unlike actual OGB datasets, may have to modify to enforce a minimum number of positives persplit given low base rate and randomness
+split_idx = dataset.get_idx_split()
+with open("train_valid_test_split_idxs_dict.pkl", "wb") as f:
+    pickle.dump(split_idx, f)
+print("dumped train/valid/test split indices dict to train_valid_test_split_idxs_dict.pkl (note these will be randomized each run by default so you should save this file for reproducibility)")
+train_loader = DataLoader(dataset[split_idx["train"]], batch_size=config["batch_size"], shuffle=True)
+valid_loader = DataLoader(dataset[split_idx["valid"]], batch_size=config["batch_size"], shuffle=False)
+
+config["use_graph_norm"] = True # TODO configure by argument
+
+print(f"config: {config}")
+
+# same class as in https://github.com/willy-b/tiny-GIN-for-ogbg-molhiv/ ,
+# though this supports GraphNorm,
+# TODO factor out to shared dependency for future such repos
+# (not updating ogbg-molhiv repo much as it is snapshot of what is on leaderboard)
+# computes a node embedding using GINConv layers, then uses pooling to predict graph level properties
+class GINGraphPropertyModel(torch.nn.Module):
+    def __init__(self, hidden_dim, output_dim, num_layers, dropout_p, return_node_embed=False):
+      super(GINGraphPropertyModel, self).__init__()
+      # fields used for computing node embedding
+      self.node_encoder = AtomEncoder(hidden_dim)
+      self.return_node_embed = return_node_embed
+      self.convs = torch.nn.ModuleList(
+          [torch_geometric.nn.conv.GINConv(MLP([hidden_dim, hidden_dim, hidden_dim])) for idx in range(0, num_layers)]
+      )
+      if config['use_graph_norm']:
+          self.bns = torch.nn.ModuleList(
+              [GraphNorm(hidden_dim) for idx in range(0, num_layers - 1)],
+          )
+      else:
+          self.bns = torch.nn.ModuleList(
+              [torch.nn.BatchNorm1d(hidden_dim) for idx in range(0, num_layers - 1)]
+          )
+      self.dropout_p = dropout_p
+      # end fields used for computing node embedding
+      # fields for graph embedding
+      self.pool = global_add_pool
+      self.linear_hidden = torch.nn.Linear(hidden_dim, hidden_dim)
+      self.linear_out = torch.nn.Linear(hidden_dim, output_dim)
+      # end fields for graph embedding
+    def reset_parameters(self):
+      for conv in self.convs:
+        conv.reset_parameters()
+      for bn in self.bns:
+        bn.reset_parameters()
+      self.linear_hidden.reset_parameters()
+      self.linear_out.reset_parameters()
+    def forward(self, x, edge_index, batch):
+      #x, edge_index, batch = batched_data.x, batched_data.edge_index, batched_data.batch
+      # compute node embedding
+      x = self.node_encoder(x)
+      for idx in range(0, len(self.convs)):
+        x = self.convs[idx](x, edge_index)
+        if idx < len(self.convs) - 1:
+          if config['use_graph_norm']:
+              x = self.bns[idx](x, batch)
+          else:
+              x = self.bns[idx](x)
+          x = torch.nn.functional.relu(x)
+          x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
+      # note x is raw logits, NOT softmax'd
+      # end computation of node embedding
+      if self.return_node_embed == True:
+        return x
+      # convert node embedding to a graph level embedding using pooling
+      x = self.pool(x, batch)
+      x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
+      # transform the graph embedding to the output dimension
+      # MLP after graph embed ensures we are not requiring the raw pooled node embeddings to be linearly separable
+      x = self.linear_hidden(x)
+      x = torch.nn.functional.relu(x)
+      x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
+      out = self.linear_out(x)
+      return out
+
+# can be used with multiple task outputs (like for molpcba) or single task output;
+# and supports using just the first output of a multi-task model if applied to a single task (for pretraining molpcba and transferring to molhiv)
+def train(model, device, data_loader, optimizer, loss_fn):
+  model.train()
+  for step, batch in enumerate(tqdm(data_loader, desc="Training batch")):
+    batch = batch.to(device)
+    if batch.x.shape[0] != 1 and batch.batch[-1] != 0:
+      # ignore nan targets (unlabeled) when computing training loss.
+      non_nan = batch.y == batch.y
+      loss = None
+      optimizer.zero_grad()
+      out = model(batch.x, batch.edge_index, batch.batch)
+      non_nan = non_nan[:min(non_nan.shape[0], out.shape[0])]
+      batch_y = batch.y[:out.shape[0], :]
+      # for crudely adapting multitask models to single task data
+      if batch.y.shape[1] == 1:
+        out = out[:, 0]
+        batch_y = batch_y[:, 0]
+        non_nan = batch_y == batch_y
+        loss = loss_fn(out[non_nan].reshape(-1, 1)*1., batch_y[non_nan].reshape(-1, 1)*1.)
+      else:
+        loss = loss_fn(out[non_nan], batch_y[non_nan])
+      loss.backward()
+      optimizer.step()
+  return loss.item()
+
+def eval(model, device, loader, evaluator, save_model_results=False, save_filename=None):
+  model.eval()
+  y_true = []
+  y_pred = []
+  for step, batch in enumerate(tqdm(loader, desc="Evaluation batch")):
+      batch = batch.to(device)
+      if batch.x.shape[0] == 1:
+          pass
+      else:
+          with torch.no_grad():
+              pred = model(batch.x, batch.edge_index, batch.batch)
+              # for crudely adapting multitask models to single task data
+              if batch.y.shape[1] == 1:
+                pred = pred[:, 0]
+              batch_y = batch.y[:min(pred.shape[0], batch.y.shape[0])]
+              y_true.append(batch_y.view(pred.shape).detach().cpu())
+              y_pred.append(pred.detach().cpu())
+  y_true = torch.cat(y_true, dim=0).numpy()
+  y_pred = torch.cat(y_pred, dim=0).numpy()
+  input_dict = {"y_true": y_true.reshape(-1, 1) if batch.y.shape[1] == 1 else y_true, "y_pred": y_pred.reshape(-1, 1) if batch.y.shape[1] == 1 else y_pred}
+  if save_model_results:
+      data = {
+          'y_pred': y_pred.squeeze(),
+          'y_true': y_true.squeeze()
+      }
+      pd.DataFrame(data=data).to_csv('ogbg_graph_' + save_filename + '.csv', sep=',', index=False)
+  return evaluator.eval(input_dict)
+
+model = GINGraphPropertyModel(config['hidden_dim'], dataset.num_tasks, config['num_layers'], config['dropout']).to(device)
+print(f"parameter count: {sum(p.numel() for p in model.parameters())}")
+model.reset_parameters()
+
+optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
+loss_fn = torch.nn.BCEWithLogitsLoss()
+best_model = None
+best_valid_metric_at_save_checkpoint = 0
+best_train_metric_at_save_checkpoint = 0
+
+for epoch in range(1, 1 + config["epochs"]):
+  if epoch == 10:
+    # reduce learning rate at this point
+    optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate']*0.5, weight_decay=config['weight_decay'])
+  loss = train(model, device, train_loader, optimizer, loss_fn)
+  train_perf = eval(model, device, train_loader, evaluator)
+  val_perf = eval(model, device, valid_loader, evaluator)
+  #test_perf = eval(model, device, test_loader, evaluator)
+  train_metric, valid_metric = train_perf[dataset.eval_metric], val_perf[dataset.eval_metric]#, test_perf[dataset.eval_metric]
+  if valid_metric >= best_valid_metric_at_save_checkpoint and train_metric >= best_train_metric_at_save_checkpoint:
+    print(f"New best validation score: {valid_metric} ({dataset.eval_metric}) without training score regression")
+    best_valid_metric_at_save_checkpoint = valid_metric
+    best_train_metric_at_save_checkpoint = train_metric
+    best_model = copy.deepcopy(model)
+  print(f'Dataset {config["dataset_id"]}, '
+    f'Epoch: {epoch}, '
+    f'Train: {train_metric:.6f} ({dataset.eval_metric}), '
+    f'Valid: {valid_metric:.6f} ({dataset.eval_metric}), '
+    #f'Test: {test_metric:.6f} ({dataset.eval_metric})'
+   )
+
+with open(f"best_{config['dataset_id']}_gin_model_{config['num_layers']}_layers_{config['hidden_dim']}_hidden.pkl", "wb") as f:
+  pickle.dump(best_model, f)
+
+train_metric = eval(best_model, device, train_loader, evaluator)[dataset.eval_metric]
+valid_metric = eval(best_model, device, valid_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_valid")[dataset.eval_metric]
+#test_metric  = eval(best_model, device, test_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_test")[dataset.eval_metric]
+
+print(f'Best model for {config["dataset_id"]} (eval metric {dataset.eval_metric}): '
+      f'Train: {train_metric:.6f}, '
+      f'Valid: {valid_metric:.6f} ')
+      #f'Test: {test_metric:.6f}')
+print(f"parameter count: {sum(p.numel() for p in best_model.parameters())}")
+
+from sklearn.metrics import RocCurveDisplay, PrecisionRecallDisplay
+import matplotlib.pyplot as plt
+model = best_model
+model.eval()
+y_true = []
+y_pred = []
+for step, batch in enumerate(tqdm(valid_loader, desc="Evaluation batch")):
+  batch = batch.to(device)
+  if batch.x.shape[0] == 1:
+    pass
+  else:
+    with torch.no_grad():
+      pred = model(batch.x, batch.edge_index, batch.batch)
+      # for crudely adapting multitask models to single task data
+      if batch.y.shape[1] == 1:
+        pred = pred[:, 0]
+      batch_y = batch.y[:min(pred.shape[0], batch.y.shape[0])]
+      y_true.append(batch_y.view(pred.shape).detach().cpu())
+      y_pred.append(pred.detach().cpu())
+
+y_true = torch.cat(y_true, dim=0).numpy()
+y_pred = torch.cat(y_pred, dim=0).numpy()
+
+# an error here about `plot_chance_level` likely indicates scikit-learn dependency is not >=1.3
+RocCurveDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
+plt.title(f"Starting to predict whether a molecule inhibits West Nile Virus NS2bNS3 Proteinase (PCBA AID 577)\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN with GraphNorm and hidden dimension {config['hidden_dim']}")
+plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}_and_GraphNorm_ROC_CURVE.png")
+plt.show()
+PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
+plt.title(f"Starting to predict whether a molecule inhibits West Nile Virus NS2bNS3 Proteinase (PCBA AID 577)\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN with GraphNorm and hidden dimension {config['hidden_dim']}")
+plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}_and_GraphNorm_PRC_CURVE.png")
+plt.show()
