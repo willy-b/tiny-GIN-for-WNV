@@ -15,6 +15,7 @@ import numpy as np
 import random
 from tqdm import tqdm
 import pickle
+from pathlib import Path
 
 import argparse
 
@@ -31,7 +32,13 @@ argparser.add_argument("--weight_decay", type=float, default=1e-6)
 #argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
 args = argparser.parse_args()
 
-meta_dict = convert_aid_577_into_ogb_dataset()
+# check if splits already exist
+data_path = Path("local_ogbg_pcba_aid_577")
+if not data_path.exists() or not data_path.is_dir():
+    meta_dict = convert_aid_577_into_ogb_dataset()
+else:
+    # default data is available, use that
+    meta_dict = {'version': 0, 'dir_path': 'local_ogbg_pcba_aid_577/pcba_aid_577', 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'random-80-10-10', 'download_name': 'pcba_aid_577', 'url': 'https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_577.zip', 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
 dataset = PygGraphPropPredDataset(name="ogbg-pcba-aid-577", root="local", transform=None, meta_dict=meta_dict)
 evaluator = Evaluator(name="ogbg-molhiv") # intentionally use ogbg-molhiv evaluator for ogbg-pcba-aid-577 since we have put data in same format (single task, binary output molecular/graph property prediction)
 
