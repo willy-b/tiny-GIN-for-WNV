@@ -33,6 +33,29 @@ pip install ogb # I'm using 1.3.6 right now
 
 2. Run this script `python main_gin.py` (I'm using python 3.10.12 but should be flexible)
 
+# Example recent output/performance
+
+(no official statistics yet as doing hyperparameter search, example below is not the best and not the worst I have seen)
+
+## One run
+
+![Example Precision-Recall Curve for Tiny GIN solution evaluated on validation split](example_WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_56_and_GraphNorm_PRC_CURVE.png)
+
+![Example Receiver-Operating Characteristic Curve evaluated on validation split](example_WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_56_and_GraphNorm_ROC_CURVE.png)
+
+## Another run
+
+![Example Precision-Recall Curve for Tiny GIN solution evaluated on validation split](example_WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_56_and_GraphNorm_PRC_CURVE2.png)
+
+![Example Receiver-Operating Characteristic Curve evaluated on validation split](example_WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_56_and_GraphNorm_ROC_CURVE2.png)
+
+Notes:
+
+- when evaluating the average precision, note that the base rate is <0.2% so e.g. average precision of 9% is pretty good and getting a hit with a very high score immediately as the first result is unlikely to happen by chance
+
+- the weight decay was technically `512e-6` for those examples instead of default `5e-4` because I was using powers of 2 multiplied by 1e-6 but should be an insignificant difference and rest of parameters were current defaults. running the defaults several times should produce similar results.
+
+
 # References
 
 ### PubChem BioAssay: HTS to identify Inhibitors of West Nile Virus NS2bNS3 Proteinase
