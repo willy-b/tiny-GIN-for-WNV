@@ -20,6 +20,7 @@ from pathlib import Path
 import argparse
 
 argparser = argparse.ArgumentParser()
+# Set this to 'cpu' if you NEED to reproduce exact numbers.
 argparser.add_argument("--device", type=str, default='cpu')
 argparser.add_argument("--num_layers", type=int, default=2)
 argparser.add_argument("--hidden_dim", type=int, default=56)
@@ -28,9 +29,29 @@ argparser.add_argument("--dropout_p", type=float, default=0.5)
 argparser.add_argument("--epochs", type=int, default=120)
 argparser.add_argument("--batch_size", type=int, default=1024) # needs large batches since < 0.2% of the data is active molecules otherwise almost all batches will be all inactives
 argparser.add_argument("--weight_decay", type=float, default=5e-4) # learning from very few examples (<100 active examples total), increase regularization to avoid overfitting
-#argparser.add_argument("--random_seed", type=int, default=1)
+# note that the random seed for your first execution determines your split
+# so if you want to reproduce official results, clear out the local_ogbg_pcba_aid_577 folder (generated on first run)
+# and run the seed 0 first!
+# alternatively, if you want to try different data splits, delete the folder and use a different seed.
+argparser.add_argument("--random_seed", type=int, default=None)
 #argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
 args = argparser.parse_args()
+
+# Let's set a random seed for reproducibility
+# If using a GPU choosing the same seed cannot be used to guarantee
+# that one gets the same result from run to run,
+# but may still be useful to ensure one is starting with different seeds.
+def set_seeds(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+if args.random_seed != None:
+    set_seeds(args.random_seed)
 
 # check if splits already exist
 data_path = Path("local_ogbg_pcba_aid_577")
@@ -42,7 +63,11 @@ else:
 dataset = PygGraphPropPredDataset(name="ogbg-pcba-aid-577", root="local", transform=None, meta_dict=meta_dict)
 evaluator = Evaluator(name="ogbg-molhiv") # intentionally use ogbg-molhiv evaluator for ogbg-pcba-aid-577 since we have put data in same format (single task, binary output molecular/graph property prediction)
 
+if args.random_seed != None:
+    set_seeds(args.random_seed)
+
 config = {
+ # Set this to 'cpu' if you NEED to reproduce exact numbers.
  'device': args.device,
  'dataset_id': 'ogbg-pcba-aid-577',
  'num_layers': args.num_layers, # 2
@@ -254,10 +279,10 @@ y_pred = torch.cat(y_pred, dim=0).numpy()
 
 # an error here about `plot_chance_level` likely indicates scikit-learn dependency is not >=1.3
 RocCurveDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-plt.title(f"Starting to predict whether a molecule inhibits West Nile Virus NS2bNS3 Proteinase (PCBA AID 577)\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN with GraphNorm and hidden dimension {config['hidden_dim']}")
+plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN with GraphNorm and hidden dimension {config['hidden_dim']}")
 plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}_and_GraphNorm_ROC_CURVE.png")
 plt.show()
 PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-plt.title(f"Starting to predict whether a molecule inhibits West Nile Virus NS2bNS3 Proteinase (PCBA AID 577)\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN with GraphNorm and hidden dimension {config['hidden_dim']}")
+plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN with GraphNorm and hidden dimension {config['hidden_dim']}")
 plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}_and_GraphNorm_PRC_CURVE.png")
 plt.show()
