@@ -29,15 +29,27 @@ def convert_aid_577_into_ogb_dataset():
    labels_numeric = np.array([0 if label != "Active" else 1 for label in labels])
    labels_numeric = labels_numeric.reshape(-1, 1) # labels_numeric.shape == (65239, 1)
    ds.save_target_labels(labels_numeric)
-   random_perm_idx = np.random.permutation([idx for idx in range(len(graphs))])
-   end_of_train_split = int(len(random_perm_idx)*0.80)
-   start_of_val_split = end_of_train_split+1
-   end_of_val_split = int(len(random_perm_idx)*0.90)
-   start_of_test_split = end_of_val_split + 1
-   train_split = np.array(random_perm_idx[:start_of_val_split])
-   val_split = np.array(random_perm_idx[start_of_val_split:start_of_test_split])
-   test_split = np.array(random_perm_idx[start_of_test_split:])
-   split_dict = {"train": train_split, "valid": val_split, "test": test_split}
+   adequate_split = False
+   while not adequate_split:
+      num_total_active = labels_numeric.sum()
+      # we have very low counts so let's not have any less than the expected active molecule count
+      expected_active_in_test_and_validation = round(0.1*num_total_active)
+      random_perm_idx = np.random.permutation([idx for idx in range(len(graphs))])
+      end_of_train_split = int(len(random_perm_idx)*0.80)
+      start_of_val_split = end_of_train_split+1
+      end_of_val_split = int(len(random_perm_idx)*0.90)
+      start_of_test_split = end_of_val_split + 1
+      train_split = np.array(random_perm_idx[:start_of_val_split])
+      val_split = np.array(random_perm_idx[start_of_val_split:start_of_test_split])
+      test_split = np.array(random_perm_idx[start_of_test_split:])
+      split_dict = {"train": train_split, "valid": val_split, "test": test_split}
+      num_active_test = labels_numeric[test_split].sum()
+      num_active_val = labels_numeric[val_split].sum()
+      adequate_split = num_active_test >= expected_active_in_test_and_validation and num_active_val >= expected_active_in_test_and_validation
+      if not adequate_split:
+         print(f"resplitting as only had {num_active_test} active molecules in the test set and {num_active_val} active molecules in validation set")
+      else:
+         print(f"accepting the split: {num_active_test} active molecules in the test set and {num_active_val} active molecules in validation set")
    ds.save_split(split_dict, "random-80-10-10")
    ds.save_task_info("classification", "rocauc", num_classes=2)
 
