@@ -35,6 +35,7 @@ argparser.add_argument("--weight_decay", type=float, default=5e-4) # learning fr
 # alternatively, if you want to try different data splits, delete the folder and use a different seed.
 argparser.add_argument("--random_seed", type=int, default=None)
 #argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
+argparser.add_argument("--disable_graph_norm", action="store_true")
 args = argparser.parse_args()
 
 # Let's set a random seed for reproducibility
@@ -88,7 +89,7 @@ print("dumped train/valid/test split indices dict to train_valid_test_split_idxs
 train_loader = DataLoader(dataset[split_idx["train"]], batch_size=config["batch_size"], shuffle=True)
 valid_loader = DataLoader(dataset[split_idx["valid"]], batch_size=config["batch_size"], shuffle=False)
 
-config["use_graph_norm"] = True # TODO configure by argument
+config["use_graph_norm"] = not args.disable_graph_norm # on by default
 
 print(f"config: {config}")
 
@@ -279,10 +280,12 @@ y_pred = torch.cat(y_pred, dim=0).numpy()
 
 # an error here about `plot_chance_level` likely indicates scikit-learn dependency is not >=1.3
 RocCurveDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN with GraphNorm and hidden dimension {config['hidden_dim']}")
-plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}_and_GraphNorm_ROC_CURVE.png")
+using_graphnorm_filename_string = "_and_GraphNorm" if config['use_graph_norm'] else ""
+using_graphnorm_title_string = " with GraphNorm" if config['use_graph_norm'] else ""
+plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
+plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE.png")
 plt.show()
 PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN with GraphNorm and hidden dimension {config['hidden_dim']}")
-plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}_and_GraphNorm_PRC_CURVE.png")
+plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
+plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE.png")
 plt.show()
