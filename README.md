@@ -36,6 +36,7 @@ pip install ogb # I'm using 1.3.6 right now
 # Example recent output/performance
 
 (no official statistics yet as doing hyperparameter search, example below is not the best and not the worst I have seen)
+(can use `--random_seed` argument and run on `--device cpu` for reproducible runs)
 
 ## One run
 
