@@ -7,25 +7,31 @@ import os
 # only need to run this once when setting up your workspace
 def convert_aid_577_into_ogb_dataset():
    aid577 = pd.read_csv("prep_pcba_577/AID_577_datatable.csv")
+   smiles_entry_tags = aid577["PUBCHEM_RESULT_TAG"]
+   assert int(smiles_entry_tags[3]) == 1 # 1-based index of data starts at index 3
+   assert int(smiles_entry_tags[4]) == 2 # 1-based index of data starts at index 3
+   assert int(smiles_entry_tags[5]) == 3 # 1-based index of data starts at index 3
+   # Instead of just skipping the first 3 post-header lines
+   # (which have empty columns of interest for us so were already skipped) in processing loop,
+   # we can skip them intentionally to be stricter on errors later (not allow any).
+   # We know our input, it is a file in the repo under our control that has been human reviewed,
+   # so we aren't expecting anything too surprising here.
+   FIXED_HEADER_LINES_OFFSET = 3
    ds = DatasetSaver("ogbg-pcba-aid-577", is_hetero=False, version=0, root="local")
    graphs = []
-   for idx in range(len(aid577["PUBCHEM_EXT_DATASOURCE_SMILES"])):
+   labels = []
+   assert len(aid577["PUBCHEM_EXT_DATASOURCE_SMILES"]) == len(aid577["PUBCHEM_ACTIVITY_OUTCOME"])
+   for idx in range(FIXED_HEADER_LINES_OFFSET, len(aid577["PUBCHEM_EXT_DATASOURCE_SMILES"])):
       smile = aid577["PUBCHEM_EXT_DATASOURCE_SMILES"][idx]
+      label = aid577["PUBCHEM_ACTIVITY_OUTCOME"][idx]
       if type(smile) != type("string") or len(smile) == 0:
-         continue
+        raise Exception("empty SMILE in unexpected location")
+      if type(label) != type("string") or len(label) == 0 or (label != 'Active' and label != 'Inactive'):
+        raise Exception(f"Found unreadable '{label}' for smile '{smile}', skipping. If smile is nonempty then dataset may be corrupted.")
       graph = smiles2graph(smile)
       graphs.append(graph)
-   ds.save_graph_list(graphs)
-   labels = []
-   for idx in range(len(aid577["PUBCHEM_ACTIVITY_OUTCOME"])):
-      label = aid577["PUBCHEM_ACTIVITY_OUTCOME"][idx]
-      if type(label) != type("string") or len(label) == 0:
-        smile = aid577["PUBCHEM_EXT_DATASOURCE_SMILES"][idx]
-        print(f"No label for smile {smile}. If smile is nonempty, please stop and check that the dataset has not become corrupted!")
-        if type(smile) == type("string") and len(smile) == 0:
-            raise Error("No label for nonempty smile string!")
-        continue
       labels.append(label)
+   ds.save_graph_list(graphs)
    labels_numeric = np.array([0 if label != "Active" else 1 for label in labels])
    labels_numeric = labels_numeric.reshape(-1, 1) # labels_numeric.shape == (65239, 1)
    ds.save_target_labels(labels_numeric)
@@ -66,4 +72,3 @@ def convert_aid_577_into_ogb_dataset():
    print(f"meta_dict: {meta_dict}")
    #{'version': 0, 'dir_path': 'ogbg_pcba_aid_577_ogbg_pcba_aid_577/pcba_aid_577', 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'random-80-10-10', 'download_name': 'pcba_aid_577', 'url': 'https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_577.zip', 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
    return meta_dict
-
