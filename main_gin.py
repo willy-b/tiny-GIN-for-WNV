@@ -64,6 +64,14 @@ else:
 dataset = PygGraphPropPredDataset(name="ogbg-pcba-aid-577", root="local", transform=None, meta_dict=meta_dict)
 evaluator = Evaluator(name="ogbg-molhiv") # intentionally use ogbg-molhiv evaluator for ogbg-pcba-aid-577 since we have put data in same format (single task, binary output molecular/graph property prediction)
 
+# for looking up SMILES strings to include in the output CSV with scores
+aid577 = pd.read_csv("prep_pcba_577/AID_577_datatable.csv")
+smiles_list = aid577["PUBCHEM_EXT_DATASOURCE_SMILES"].values[3:] # see below, 1-based index of this data starts at index 3, so that should be zero-index in our zero-based index smiles list
+smiles_entry_tags = aid577["PUBCHEM_RESULT_TAG"]
+assert int(smiles_entry_tags[3]) == 1 # 1-based index of data starts at index 3
+assert int(smiles_entry_tags[4]) == 2 # 1-based index of data starts at index 3
+assert int(smiles_entry_tags[5]) == 3 # 1-based index of data starts at index 3
+
 if args.random_seed != None:
     set_seeds(args.random_seed)
 
@@ -183,23 +191,28 @@ def train(model, device, data_loader, optimizer, loss_fn):
       optimizer.step()
   return loss.item()
 
-def eval(model, device, loader, evaluator, save_model_results=False, save_filename=None):
+def eval(model, device, loader, evaluator, save_model_results=False, save_filename=None, split_indices=[]):
   model.eval()
   y_true = []
   y_pred = []
+  indices = []
+  seen = set()
   for step, batch in enumerate(tqdm(loader, desc="Evaluation batch")):
       batch = batch.to(device)
-      if batch.x.shape[0] == 1:
-          pass
-      else:
-          with torch.no_grad():
-              pred = model(batch.x, batch.edge_index, batch.batch)
-              # for crudely adapting multitask models to single task data
-              if batch.y.shape[1] == 1:
-                pred = pred[:, 0]
-              batch_y = batch.y[:min(pred.shape[0], batch.y.shape[0])]
-              y_true.append(batch_y.view(pred.shape).detach().cpu())
-              y_pred.append(pred.detach().cpu())
+      with torch.no_grad():
+          pred = model(batch.x, batch.edge_index, batch.batch)
+          # for crudely adapting multitask models to single task data
+          if batch.y.shape[1] == 1:
+            pred = pred[:, 0]
+          batch_y = batch.y[:min(pred.shape[0], batch.y.shape[0])]
+          y_true.append(batch_y.view(pred.shape).detach().cpu())
+          y_pred.append(pred.detach().cpu())
+          offset = len(seen)
+          for ind in batch.batch:
+              adjusted_ind = ind.item() + offset
+              if not adjusted_ind in seen:
+                  indices.append(adjusted_ind)
+                  seen.add(adjusted_ind)
   y_true = torch.cat(y_true, dim=0).numpy()
   y_pred = torch.cat(y_pred, dim=0).numpy()
   input_dict = {"y_true": y_true.reshape(-1, 1) if batch.y.shape[1] == 1 else y_true, "y_pred": y_pred.reshape(-1, 1) if batch.y.shape[1] == 1 else y_pred}
@@ -208,6 +221,12 @@ def eval(model, device, loader, evaluator, save_model_results=False, save_filena
           'y_pred': y_pred.squeeze(),
           'y_true': y_true.squeeze()
       }
+      # lookup smiles to add to CSV
+      if len(split_indices) > 0:
+          # we need the split indices to lookup the smiles
+          original_indices = [split_indices[idx] for idx in indices]
+          smiles = [smiles_list[idx] for idx in original_indices]
+          data["smiles"] = smiles
       pd.DataFrame(data=data).to_csv('ogbg_graph_' + save_filename + '.csv', sep=',', index=False)
   return evaluator.eval(input_dict)
 
@@ -246,8 +265,8 @@ with open(f"best_{config['dataset_id']}_gin_model_{config['num_layers']}_layers_
   pickle.dump(best_model, f)
 
 train_metric = eval(best_model, device, train_loader, evaluator)[dataset.eval_metric]
-valid_metric = eval(best_model, device, valid_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_valid")[dataset.eval_metric]
-#test_metric  = eval(best_model, device, test_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_test")[dataset.eval_metric]
+valid_metric = eval(best_model, device, valid_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_valid", split_indices=split_idx["valid"])[dataset.eval_metric]
+#test_metric  = eval(best_model, device, test_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_test", split_indices=split_idx["test"])[dataset.eval_metric]
 
 print(f'Best model for {config["dataset_id"]} (eval metric {dataset.eval_metric}): '
       f'Train: {train_metric:.6f}, '
