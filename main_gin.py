@@ -9,6 +9,9 @@ from torch_geometric.nn import GINConv, global_add_pool
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn.models import MLP
 
+from sklearn.metrics import RocCurveDisplay, PrecisionRecallDisplay
+import matplotlib.pyplot as plt
+
 import pandas as pd
 import copy
 import numpy as np
@@ -191,7 +194,7 @@ def train(model, device, data_loader, optimizer, loss_fn):
       optimizer.step()
   return loss.item()
 
-def eval(model, device, loader, evaluator, save_model_results=False, save_filename=None, split_indices=[]):
+def eval(model, device, loader, evaluator, save_model_results=False, save_filename=None, split_indices=[], plot_metrics=False):
   model.eval()
   y_true = []
   y_pred = []
@@ -228,6 +231,18 @@ def eval(model, device, loader, evaluator, save_model_results=False, save_filena
           smiles = [smiles_list[idx] for idx in original_indices]
           data["smiles"] = smiles
       pd.DataFrame(data=data).to_csv('ogbg_graph_' + save_filename + '.csv', sep=',', index=False)
+  if plot_metrics:
+      # an error here about `plot_chance_level` likely indicates scikit-learn dependency is not >=1.3
+      RocCurveDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
+      using_graphnorm_filename_string = "_and_GraphNorm" if config['use_graph_norm'] else ""
+      using_graphnorm_title_string = " with GraphNorm" if config['use_graph_norm'] else ""
+      plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
+      plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE.png")
+      plt.show()
+      PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
+      plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
+      plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE.png")
+      plt.show()
   return evaluator.eval(input_dict)
 
 model = GINGraphPropertyModel(config['hidden_dim'], dataset.num_tasks, config['num_layers'], config['dropout']).to(device)
@@ -265,7 +280,7 @@ with open(f"best_{config['dataset_id']}_gin_model_{config['num_layers']}_layers_
   pickle.dump(best_model, f)
 
 train_metric = eval(best_model, device, train_loader, evaluator)[dataset.eval_metric]
-valid_metric = eval(best_model, device, valid_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_valid", split_indices=split_idx["valid"])[dataset.eval_metric]
+valid_metric = eval(best_model, device, valid_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_valid", split_indices=split_idx["valid"], plot_metrics=True)[dataset.eval_metric]
 #test_metric  = eval(best_model, device, test_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_test", split_indices=split_idx["test"])[dataset.eval_metric]
 
 print(f'Best model for {config["dataset_id"]} (eval metric {dataset.eval_metric}): '
@@ -274,37 +289,3 @@ print(f'Best model for {config["dataset_id"]} (eval metric {dataset.eval_metric}
       #f'Test: {test_metric:.6f}')
 print(f"parameter count: {sum(p.numel() for p in best_model.parameters())}")
 
-from sklearn.metrics import RocCurveDisplay, PrecisionRecallDisplay
-import matplotlib.pyplot as plt
-model = best_model
-model.eval()
-y_true = []
-y_pred = []
-for step, batch in enumerate(tqdm(valid_loader, desc="Evaluation batch")):
-  batch = batch.to(device)
-  if batch.x.shape[0] == 1:
-    pass
-  else:
-    with torch.no_grad():
-      pred = model(batch.x, batch.edge_index, batch.batch)
-      # for crudely adapting multitask models to single task data
-      if batch.y.shape[1] == 1:
-        pred = pred[:, 0]
-      batch_y = batch.y[:min(pred.shape[0], batch.y.shape[0])]
-      y_true.append(batch_y.view(pred.shape).detach().cpu())
-      y_pred.append(pred.detach().cpu())
-
-y_true = torch.cat(y_true, dim=0).numpy()
-y_pred = torch.cat(y_pred, dim=0).numpy()
-
-# an error here about `plot_chance_level` likely indicates scikit-learn dependency is not >=1.3
-RocCurveDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-using_graphnorm_filename_string = "_and_GraphNorm" if config['use_graph_norm'] else ""
-using_graphnorm_title_string = " with GraphNorm" if config['use_graph_norm'] else ""
-plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
-plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE.png")
-plt.show()
-PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
-plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE.png")
-plt.show()
