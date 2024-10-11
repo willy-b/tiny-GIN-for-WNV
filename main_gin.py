@@ -40,6 +40,7 @@ argparser.add_argument("--random_seed", type=int, default=None)
 argparser.add_argument("--random_seed_for_data_splits", type=int, default=None) # default uses 0 but resplits if set explicitly
 #argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
 argparser.add_argument("--disable_graph_norm", action="store_true")
+argparser.add_argument("--hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check", action="store_true")
 args = argparser.parse_args()
 
 # Let's set a random seed for reproducibility
@@ -99,8 +100,21 @@ split_idx = dataset.get_idx_split()
 with open("train_valid_test_split_idxs_dict.pkl", "wb") as f:
     pickle.dump(split_idx, f)
 print("dumped train/valid/test split indices dict to train_valid_test_split_idxs_dict.pkl (note these will be randomized each run by default so you should save this file for reproducibility)")
-train_loader = DataLoader(dataset[split_idx["train"]], batch_size=config["batch_size"], shuffle=True)
-valid_loader = DataLoader(dataset[split_idx["valid"]], batch_size=config["batch_size"], shuffle=False)
+
+# note they are preshuffled and presplit into training/validation/test splits
+if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check and (len(split_idx["train"]) < 2 * len(split_idx["valid"])):
+    raise Exception("Cannot use --hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check when validation set is greater than half the train set size due to insufficient data remaining.")
+
+train_split = split_idx["train"] if not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check else split_idx["train"][len(split_idx["valid"]):]
+valid_split = split_idx["valid"]
+
+dev_split = None if not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check else split_idx["train"][:len(split_idx["valid"])]# NOT TEST, this is taking some of the existing training split
+train_loader = DataLoader(dataset[train_split], batch_size=config["batch_size"], shuffle=True)
+valid_loader = DataLoader(dataset[valid_split], batch_size=config["batch_size"], shuffle=False)
+dev_loader = None
+if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check:
+    print(f"Held out {len(dev_split)} datapoints from training split as a final generalization check after selecting best model (similar to early stopping) using valid split")
+    dev_loader = DataLoader(dataset[dev_split], batch_size=config["batch_size"], shuffle=False)
 
 config["use_graph_norm"] = not args.disable_graph_norm # on by default
 
@@ -196,7 +210,7 @@ def train(model, device, data_loader, optimizer, loss_fn):
       optimizer.step()
   return loss.item()
 
-def eval(model, device, loader, evaluator, save_model_results=False, save_filename=None, split_indices=[], plot_metrics=False):
+def eval(model, device, loader, evaluator, save_model_results=False, save_filename=None, split_indices=[], plot_metrics=False, figure_save_tag=""):
   model.eval()
   y_true = []
   y_pred = []
@@ -239,11 +253,13 @@ def eval(model, device, loader, evaluator, save_model_results=False, save_filena
       using_graphnorm_filename_string = "_and_GraphNorm" if config['use_graph_norm'] else ""
       using_graphnorm_title_string = " with GraphNorm" if config['use_graph_norm'] else ""
       plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
-      plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE.png")
+      if figure_save_tag != "":
+          figure_save_tag = f"_{figure_save_tag}"
+      plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE{figure_save_tag}.png")
       plt.show()
       PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
       plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
-      plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE.png")
+      plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE{figure_save_tag}.png")
       plt.show()
   return evaluator.eval(input_dict)
 
@@ -282,12 +298,17 @@ with open(f"best_{config['dataset_id']}_gin_model_{config['num_layers']}_layers_
   pickle.dump(best_model, f)
 
 train_metric = eval(best_model, device, train_loader, evaluator)[dataset.eval_metric]
-valid_metric = eval(best_model, device, valid_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_valid", split_indices=split_idx["valid"], plot_metrics=True)[dataset.eval_metric]
+valid_metric = eval(best_model, device, valid_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_valid", split_indices=valid_split, plot_metrics=True, figure_save_tag="valid")[dataset.eval_metric]
+if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check:
+    dev_metric = eval(best_model, device, dev_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_train_split_holdout_as_dev", split_indices=dev_split, plot_metrics=True, figure_save_tag="train_subset_holdout_as_dev")[dataset.eval_metric]
+
 #test_metric  = eval(best_model, device, test_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_test", split_indices=split_idx["test"])[dataset.eval_metric]
 
 print(f'Best model for {config["dataset_id"]} (eval metric {dataset.eval_metric}): '
       f'Train: {train_metric:.6f}, '
       f'Valid: {valid_metric:.6f} ')
       #f'Test: {test_metric:.6f}')
+if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check:
+    print(f"Train subset held out as dev for generalization check: {dev_metric:.6f}")
 print(f"parameter count: {sum(p.numel() for p in best_model.parameters())}")
 
