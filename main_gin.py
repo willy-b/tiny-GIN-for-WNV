@@ -37,6 +37,7 @@ argparser.add_argument("--weight_decay", type=float, default=5e-4) # learning fr
 # and run the seed 0 first!
 # alternatively, if you want to try different data splits, delete the folder and use a different seed.
 argparser.add_argument("--random_seed", type=int, default=None)
+argparser.add_argument("--random_seed_for_data_splits", type=int, default=None) # default uses 0 but resplits if set explicitly
 #argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
 argparser.add_argument("--disable_graph_norm", action="store_true")
 args = argparser.parse_args()
@@ -54,14 +55,15 @@ def set_seeds(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-if args.random_seed != None:
-    set_seeds(args.random_seed)
+set_seeds(args.random_seed_for_data_splits if args.random_seed_for_data_splits != None else 0)
 
 # check if splits already exist
 data_path = Path("local_ogbg_pcba_aid_577")
 if not data_path.exists() or not data_path.is_dir():
     meta_dict = convert_aid_577_into_ogb_dataset()
 else:
+    if args.random_seed_for_data_splits != None:
+        raise Exception(f"Data is already split into train/valid/test but `--random_seed_for_data_splits` argument is set, if you intend to split the data according to the specified seed and it is not the current split, please remove `{data_path}` folder and run again or if you want to reuse the existing split remove the `--random_seed_for_data_splits` argument. If you do not know what to do and you are seeing this message, you should probably remove the `{data_path}` folder (this is the safest route if copy pasting a command which includes that argument).")
     # default data is available, use that
     meta_dict = {'version': 0, 'dir_path': 'local_ogbg_pcba_aid_577/pcba_aid_577', 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'random-80-10-10', 'download_name': 'pcba_aid_577', 'url': 'https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_577.zip', 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
 dataset = PygGraphPropPredDataset(name="ogbg-pcba-aid-577", root="local", transform=None, meta_dict=meta_dict)
