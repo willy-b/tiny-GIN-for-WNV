@@ -95,7 +95,6 @@ config = {
 }
 device = config["device"]
 
-# note these splits are randomized each time right now, unlike actual OGB datasets, may have to modify to enforce a minimum number of positives persplit given low base rate and randomness
 split_idx = dataset.get_idx_split()
 with open("train_valid_test_split_idxs_dict.pkl", "wb") as f:
     pickle.dump(split_idx, f)
@@ -105,10 +104,26 @@ print("dumped train/valid/test split indices dict to train_valid_test_split_idxs
 if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check and (len(split_idx["train"]) < 2 * len(split_idx["valid"])):
     raise Exception("Cannot use --hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check when validation set is greater than half the train set size due to insufficient data remaining.")
 
-train_split = split_idx["train"] if not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check else split_idx["train"][len(split_idx["valid"]):]
+# based on args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check we can hold out validation split sized chunk of our train split as an extra dev set for final generalization check (not peeking at test) after doing early stopping on training using validation performance
+adequate_split = False
+full_train_split = split_idx["train"]
+while not adequate_split:
+    train_split = full_train_split if not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check else full_train_split[len(split_idx["valid"]):]
+    gen_labels = None if not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check else np.array([d.y for d in dataset[full_train_split[:len(split_idx["valid"])]]])
+    valid_labels = np.array([d.y for d in dataset[split_idx["valid"]]])
+    adequate_split = (not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check) or (gen_labels.sum() >= valid_labels.sum())
+    if not adequate_split:
+        print(f"Resplitting generalization check hold out from training data; only had {gen_labels.sum()} active molecules vs valid which has {valid_labels.sum()} active molecules")
+        # we can permute this since training data is shuffled anyway
+        # then we resample a valid split sized subset if hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check is set until we get enough active molecules in our sample to score the result
+        full_train_split = np.random.permutation(full_train_split)
+    else:
+        if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check:
+            print(f"Found working generalization check hold out from training data; has {gen_labels.sum()} active molecules vs valid which has {valid_labels.sum()} active molecules")
+
 valid_split = split_idx["valid"]
 
-dev_split = None if not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check else split_idx["train"][:len(split_idx["valid"])]# NOT TEST, this is taking some of the existing training split
+dev_split = None if not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check else full_train_split[:len(split_idx["valid"])]# NOT TEST, this is taking some of the existing training split
 train_loader = DataLoader(dataset[train_split], batch_size=config["batch_size"], shuffle=True)
 valid_loader = DataLoader(dataset[valid_split], batch_size=config["batch_size"], shuffle=False)
 dev_loader = None
