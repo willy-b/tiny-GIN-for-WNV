@@ -9,7 +9,7 @@ from torch_geometric.nn import GINConv, global_add_pool
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn.models import MLP
 
-from sklearn.metrics import RocCurveDisplay, PrecisionRecallDisplay
+from sklearn.metrics import RocCurveDisplay, roc_auc_score, PrecisionRecallDisplay, average_precision_score
 import matplotlib.pyplot as plt
 
 import pandas as pd
@@ -270,11 +270,18 @@ def eval(model, device, loader, evaluator, save_model_results=False, save_filena
       plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
       if figure_save_tag != "":
           figure_save_tag = f"_{figure_save_tag}"
-      plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE{figure_save_tag}.png")
+      rocauc_figure_filename = f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE{figure_save_tag}.png"
+      plt.savefig(rocauc_figure_filename)
+      rocauc_score = roc_auc_score(y_true, y_pred)
+      print(f"Generated {rocauc_figure_filename}\nshowing Receiver Operating Characteristic Area Under the Curve (ROCAUC) score of {rocauc_score:.6f} (chance level is {0.5:.6f})")
       plt.show()
       PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
       plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
-      plt.savefig(f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE{figure_save_tag}.png")
+      precision_recall_display_filename = f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE{figure_save_tag}.png"
+      plt.savefig(precision_recall_display_filename)
+      ap_score = average_precision_score(y_true, y_pred)
+      chance_ap = y_true.sum()/len(y_true)
+      print(f"Generated {precision_recall_display_filename}\nshowing average precision (AP) score of {ap_score:.6f} (chance level is {chance_ap:.6f})")
       plt.show()
   return evaluator.eval(input_dict)
 
