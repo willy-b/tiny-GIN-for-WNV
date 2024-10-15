@@ -39,6 +39,14 @@ argparser.add_argument("--weight_decay", type=float, default=5e-4) # learning fr
 argparser.add_argument("--random_seed", type=int, default=None)
 argparser.add_argument("--random_seed_for_data_splits", type=int, default=None) # default uses 0 but resplits if set explicitly
 #argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
+# Optionally, allow reweighting of loss to account for class imbalance.
+# Default of 1.0 has no effect,
+# setting to 1/active_molecule_prevalence would encourage recall of active molecules same as inactive at cost of precision.
+# When judging by ROCAUC and/or AP using the raw y prediction scores
+# to rank the results, this is not necessary but may of interest
+# especially if using output as a classifier on a single example
+# or online rather than ranking a list.
+argparser.add_argument("--active_class_weight", type=float, default=1.0)
 argparser.add_argument("--disable_graph_norm", action="store_true")
 argparser.add_argument("--hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check", action="store_true")
 args = argparser.parse_args()
@@ -290,7 +298,7 @@ print(f"parameter count: {sum(p.numel() for p in model.parameters())}")
 model.reset_parameters()
 
 optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
-loss_fn = torch.nn.BCEWithLogitsLoss()
+loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([args.active_class_weight]))
 best_model = None
 best_valid_metric_at_save_checkpoint = 0
 best_train_metric_at_save_checkpoint = 0
