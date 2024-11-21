@@ -59,6 +59,9 @@ Notes:
 
 - the weight decay was technically `512e-6` for those examples instead of default `5e-4` because I was using powers of 2 multiplied by 1e-6 but should be an insignificant difference and rest of parameters were current defaults. running the defaults several times should produce similar results.
 
+**Note, I will be using random splits when I evaluate this though I support in the code a fixed train/valid/test split, due to different hardwares giving different splits causing me personally to have seen summary statistics from different random splits (unlike for OGB competition in other repo where the splits are preset by the authority).**
+
+**One can also expect still statistically significant but worse than when validation set is used for early stopping/model selection performance on one's holdout set. Above I have not reported a holdout value as I was still doing a hyperparameter search.**
 
 # References
 
