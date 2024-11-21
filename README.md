@@ -14,6 +14,9 @@ OGB has no dataset available at this time for West Nile Virus, but PubChem BioAs
 I will start by considering the West Nile Virus related dataset "HTS to identify Inhibitors of West Nile Virus NS2bNS3 Proteinase" and predicting such NS2bNS3 protease inhibitors as they were considered likely at the time of that datasets publication to be WNV antiviral drug candidates:
 ![PubChem BioAssay AID 577 - HTS to identify Inhibitors of West Nile Virus NS2bNS3 Proteinase](pcba_aid_577_description_snippet.png)
 
+The dataset is from 2006, but see also the 2021 paper "Targeting the protease of West Nile virus" ( Voss and Nitsche 2021 , https://pmc.ncbi.nlm.nih.gov/articles/PMC8372202/ ) 
+for a review of why the NS2bNS3 proteinase is still a promising target for WNV antivirals.
+
 We can put that into OGB format for consistency and test a similar tiny Graph Isomorphism Network (GIN) on it.
 
 NOTE THERE IS NO COMPETITION ASSOCIATED WITH THIS DATASET THAT I AM AWARE OF, THIS IS JUST FOR INTEREST IN THE PROBLEM UNLIKE THE OGBG-MOLHIV REPO.
