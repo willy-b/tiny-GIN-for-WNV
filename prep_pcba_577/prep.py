@@ -5,7 +5,7 @@ import pandas as pd
 import os
 
 # only need to run this once when setting up your workspace
-def convert_aid_577_into_ogb_dataset():
+def convert_aid_577_into_ogb_dataset(use_scaffold_split=False, scaffold_split_seed=0):
    aid577 = pd.read_csv("prep_pcba_577/AID_577_datatable.csv")
    smiles_entry_tags = aid577["PUBCHEM_RESULT_TAG"]
    assert int(smiles_entry_tags[3]) == 1 # 1-based index of data starts at index 3
@@ -20,6 +20,7 @@ def convert_aid_577_into_ogb_dataset():
    ds = DatasetSaver("ogbg-pcba-aid-577", is_hetero=False, version=0, root="local")
    graphs = []
    labels = []
+   smiles_used = []
    assert len(aid577["PUBCHEM_EXT_DATASOURCE_SMILES"]) == len(aid577["PUBCHEM_ACTIVITY_OUTCOME"])
    for idx in range(FIXED_HEADER_LINES_OFFSET, len(aid577["PUBCHEM_EXT_DATASOURCE_SMILES"])):
       smile = aid577["PUBCHEM_EXT_DATASOURCE_SMILES"][idx]
@@ -29,6 +30,7 @@ def convert_aid_577_into_ogb_dataset():
       if type(label) != type("string") or len(label) == 0 or (label != 'Active' and label != 'Inactive'):
         raise Exception(f"Found unreadable '{label}' for smile '{smile}', skipping. If smile is nonempty then dataset may be corrupted.")
       graph = smiles2graph(smile)
+      smiles_used.append(smile)
       graphs.append(graph)
       labels.append(label)
    ds.save_graph_list(graphs)
@@ -36,27 +38,67 @@ def convert_aid_577_into_ogb_dataset():
    labels_numeric = labels_numeric.reshape(-1, 1) # labels_numeric.shape == (65239, 1)
    ds.save_target_labels(labels_numeric)
    adequate_split = False
-   while not adequate_split:
-      num_total_active = labels_numeric.sum()
-      # we have very low counts so let's not have any less than the expected active molecule count
-      expected_active_in_test_and_validation = round(0.1*num_total_active)
-      random_perm_idx = np.random.permutation([idx for idx in range(len(graphs))])
-      end_of_train_split = int(len(random_perm_idx)*0.80)
-      start_of_val_split = end_of_train_split+1
-      end_of_val_split = int(len(random_perm_idx)*0.90)
-      start_of_test_split = end_of_val_split + 1
-      train_split = np.array(random_perm_idx[:start_of_val_split])
-      val_split = np.array(random_perm_idx[start_of_val_split:start_of_test_split])
-      test_split = np.array(random_perm_idx[start_of_test_split:])
-      split_dict = {"train": train_split, "valid": val_split, "test": test_split}
-      num_active_test = labels_numeric[test_split].sum()
-      num_active_val = labels_numeric[val_split].sum()
-      adequate_split = num_active_test >= expected_active_in_test_and_validation and num_active_val >= expected_active_in_test_and_validation
-      if not adequate_split:
-         print(f"resplitting as only had {num_active_test} active molecules in the test set and {num_active_val} active molecules in validation set")
-      else:
-         print(f"accepting the split: {num_active_test} active molecules in the test set and {num_active_val} active molecules in validation set")
-   ds.save_split(split_dict, "random-80-10-10")
+   num_total_active = labels_numeric.sum()
+   # we have very low counts so let's not have any less than the expected active molecule count
+   expected_active_in_test_and_validation = round(0.1*num_total_active)
+   if use_scaffold_split:
+      # per MoleculeNet paper https://pubs.rsc.org/en/content/articlehtml/2018/sc/c7sc02664a
+      # "Scaffold splitting splits the samples based on their two-dimensional structural frameworks,[62] as implemented in RDKit.[63] Since scaffold splitting attempts to separate structurally different molecules into different subsets, it offers a greater challenge for learning algorithms than the random split."
+      # They contributed their ScaffoldSplitter to the DeepChem library, so we use that implementation (which wraps RDKit's MurckoScaffold)
+      # "MoleculeNet contributes the code for these splitting methods into DeepChem. Users of the library can use these splits on new datasets with short library calls."
+      # https://deepchem.readthedocs.io/en/2.8.0/api_reference/splitters.html#scaffoldsplitter
+      import deepchem as dc
+      Xs = np.zeros(len(graphs)) # we do not need to add our molecule representation as we just use this method to get the split indices and keep data saved in OGB format
+      # here just looking at split by this tool
+      Ys = labels_numeric
+      frac_train = 0.80
+      frac_valid = 0.10
+      frac_test = 0.10
+      scaffoldsplitter = dc.splits.ScaffoldSplitter()
+      while not adequate_split:
+         # In https://github.com/deepchem/deepchem/blob/d5b293934d427062f52e2d92c1569d53d10418f9/deepchem/splits/splitters.py#L1541 
+         # the DeepChem team silently ignores their "seed" argument to "split", so we need to permute first
+         np.random.seed(scaffold_split_seed)
+         random_perm_idx = np.random.permutation([idx for idx in range(len(graphs))])
+         permuted_smiles = [smiles_used[idx] for idx in random_perm_idx]
+         permuted_Ys = [Ys[idx] for idx in random_perm_idx]
+         pcba_aid_577_deepchem_dataset_without_features = dc.data.DiskDataset.from_numpy(X=Xs,y=permuted_Ys,w=np.zeros(len(graphs)),ids=permuted_smiles)
+         train_split, val_split, test_split = scaffoldsplitter.split(pcba_aid_577_deepchem_dataset_without_features, frac_train, frac_valid, frac_test, seed=scaffold_split_seed)
+         train_split = random_perm_idx[train_split]
+         val_split = random_perm_idx[val_split]
+         test_split = random_perm_idx[test_split]
+         split_dict = {"train": np.array(train_split), "valid": np.array(val_split), "test": np.array(test_split)}
+         num_active_train = labels_numeric[train_split].sum()
+         num_active_test = labels_numeric[test_split].sum()
+         num_active_val = labels_numeric[val_split].sum()
+         adequate_split = num_active_test >= expected_active_in_test_and_validation and num_active_val >= expected_active_in_test_and_validation         
+         if not adequate_split:
+            print(f"resplitting as only had {num_active_test} active molecules in the test set and {num_active_val} active molecules in validation set (with {num_active_train} training set actives), incrementing scaffold_split_seed from {scaffold_split_seed} to {scaffold_split_seed+1}")
+            scaffold_split_seed += 1
+         else:
+            print(f"accepting the split: {num_active_test} active molecules in the test set and {num_active_val} active molecules in validation set (with {num_active_train} training set actives)")
+      ds.save_split(split_dict, "scaffold-80-10-10")
+   else:
+      while not adequate_split:
+         random_perm_idx = np.random.permutation([idx for idx in range(len(graphs))])
+         end_of_train_split = int(len(random_perm_idx)*0.80)
+         start_of_val_split = end_of_train_split+1
+         end_of_val_split = int(len(random_perm_idx)*0.90)
+         start_of_test_split = end_of_val_split + 1
+         train_split = np.array(random_perm_idx[:start_of_val_split])
+         val_split = np.array(random_perm_idx[start_of_val_split:start_of_test_split])
+         test_split = np.array(random_perm_idx[start_of_test_split:])
+         split_dict = {"train": train_split, "valid": val_split, "test": test_split}
+         num_active_train = labels_numeric[train_split].sum()
+         num_active_test = labels_numeric[test_split].sum()
+         num_active_val = labels_numeric[val_split].sum()
+         adequate_split = num_active_test >= expected_active_in_test_and_validation and num_active_val >= expected_active_in_test_and_validation
+         if not adequate_split:
+            print(f"resplitting as only had {num_active_test} active molecules in the test set and {num_active_val} active molecules in validation set (with {num_active_train} training set actives)")
+         else:
+            print(f"accepting the split: {num_active_test} active molecules in the test set and {num_active_val} active molecules in validation set (with {num_active_train} training set actives)")
+      ds.save_split(split_dict, "random-80-10-10")
+   # regardless of split, set same task info
    ds.save_task_info("classification", "rocauc", num_classes=2)
 
    # recall we are creating a local unofficial dataset so we can test PCBA AID 577 with code written to work with OGB formatted datasets but I don't actually intend to put PCBA AID 577 into OGB, so no mapping dir is required, however the OGB code requires this step is run

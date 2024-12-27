@@ -26,18 +26,17 @@ argparser = argparse.ArgumentParser()
 # Set this to 'cpu' if you NEED to reproduce exact numbers.
 argparser.add_argument("--device", type=str, default='cpu')
 argparser.add_argument("--num_layers", type=int, default=2)
-argparser.add_argument("--hidden_dim", type=int, default=56)
+argparser.add_argument("--hidden_dim", type=int, default=8) # very small number of active molecule examples, do not want to overfit any particular scaffold, need to lower parameter count vs ogbg-molhiv solution with more than 10x active fraction, reducing to 12d gets us 1/10th the parameters, scaling down parameters with data, found going down to 8d with other adjustments was possible
 argparser.add_argument("--learning_rate", type=float, default=0.001)
+argparser.add_argument("--grad_clip_max_value", type=float, default=5e-3)
 argparser.add_argument("--dropout_p", type=float, default=0.5)
-argparser.add_argument("--epochs", type=int, default=120)
+argparser.add_argument("--epochs", type=int, default=120) # not enough data for many epochs to be useful, but we have early stopping built in (saves best valid score). recommend to set to 10 for scaffold split where overfitting to a particular set of scaffolds is a real problem if it runs too many epochs.
 argparser.add_argument("--batch_size", type=int, default=1024) # needs large batches since < 0.2% of the data is active molecules otherwise almost all batches will be all inactives
-argparser.add_argument("--weight_decay", type=float, default=5e-4) # learning from very few examples (<100 active examples total), increase regularization to avoid overfitting
-# note that the random seed for your first execution determines your split
-# so if you want to reproduce official results, clear out the local_ogbg_pcba_aid_577 folder (generated on first run)
-# and run the seed 0 first!
-# alternatively, if you want to try different data splits, delete the folder and use a different seed.
+argparser.add_argument("--weight_decay", type=float, default=1e-6) # learning from very few examples (<100 active examples total), increase regularization to avoid overfitting
 argparser.add_argument("--random_seed", type=int, default=None)
 argparser.add_argument("--random_seed_for_data_splits", type=int, default=None) # default uses 0 but resplits if set explicitly
+argparser.add_argument("--use_scaffold_split", action="store_true")
+argparser.add_argument("--use_random_split", action="store_true")
 #argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
 # Optionally, allow reweighting of loss to account for class imbalance.
 # Default of 1.0 has no effect,
@@ -64,17 +63,26 @@ def set_seeds(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-set_seeds(args.random_seed_for_data_splits if args.random_seed_for_data_splits != None else 0)
+split_seed = args.random_seed_for_data_splits if args.random_seed_for_data_splits != None else 0
+set_seeds(split_seed)
+
+use_scaffold_split = args.use_scaffold_split
+use_random_split = args.use_random_split
+if use_scaffold_split and use_random_split:
+    print("You cannot specify both `--use_scaffold_split` and `--use_random_split`, please choose one!")
+
+if not use_scaffold_split and not use_random_split:
+    print("You must either specify `--use_scaffold_split` (harder) or `--use_random_split` (easier)")
 
 # check if splits already exist
 data_path = Path("local_ogbg_pcba_aid_577")
 if not data_path.exists() or not data_path.is_dir():
-    meta_dict = convert_aid_577_into_ogb_dataset()
+    meta_dict = convert_aid_577_into_ogb_dataset(use_scaffold_split=use_scaffold_split, scaffold_split_seed=split_seed)
 else:
     if args.random_seed_for_data_splits != None:
         raise Exception(f"Data is already split into train/valid/test but `--random_seed_for_data_splits` argument is set, if you intend to split the data according to the specified seed and it is not the current split, please remove `{data_path}` folder and run again or if you want to reuse the existing split remove the `--random_seed_for_data_splits` argument. If you do not know what to do and you are seeing this message, you should probably remove the `{data_path}` folder (this is the safest route if copy pasting a command which includes that argument).")
     # default data is available, use that
-    meta_dict = {'version': 0, 'dir_path': 'local_ogbg_pcba_aid_577/pcba_aid_577', 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'random-80-10-10', 'download_name': 'pcba_aid_577', 'url': 'https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_577.zip', 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
+    meta_dict = {'version': 0, 'dir_path': 'local_ogbg_pcba_aid_577/pcba_aid_577', 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'scaffold-80-10-10' if use_scaffold_split else 'random-80-10-10', 'download_name': 'pcba_aid_577', 'url': 'https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_577.zip', 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
 dataset = PygGraphPropPredDataset(name="ogbg-pcba-aid-577", root="local", transform=None, meta_dict=meta_dict)
 evaluator = Evaluator(name="ogbg-molhiv") # intentionally use ogbg-molhiv evaluator for ogbg-pcba-aid-577 since we have put data in same format (single task, binary output molecular/graph property prediction)
 
@@ -93,13 +101,15 @@ config = {
  # Set this to 'cpu' if you NEED to reproduce exact numbers.
  'device': args.device,
  'dataset_id': 'ogbg-pcba-aid-577',
- 'num_layers': args.num_layers, # 2
- 'hidden_dim': args.hidden_dim, # 56
- 'dropout': args.dropout_p, # 0.50
- 'learning_rate': args.learning_rate, # 0.001
- 'epochs': args.epochs, # 120, this problem may need more time than ogbg-molhiv
- 'batch_size': args.batch_size, # 1024 ; needs larger batches since < 0.2% of the data is active molecules otherwise almost all batches will be entirely inactive examples for that gradient descent step
- 'weight_decay': args.weight_decay # 5e-4 ; learning from very few examples (<100 active examples total in the training data), increase regularization to avoid overfitting
+ 'num_layers': args.num_layers,
+ 'hidden_dim': args.hidden_dim,
+ 'dropout': args.dropout_p,
+ 'learning_rate': args.learning_rate,
+ 'epochs': args.epochs,
+ 'batch_size': args.batch_size,
+ 'weight_decay': args.weight_decay,
+ 'grad_clip_max_value': args.grad_clip_max_value,
+ 'split_type': 'scaffold' if args.use_scaffold_split else 'random'
 }
 device = config["device"]
 
@@ -230,6 +240,8 @@ def train(model, device, data_loader, optimizer, loss_fn):
       else:
         loss = loss_fn(out[non_nan], batch_y[non_nan])
       loss.backward()
+      if args.grad_clip_max_value != None:
+          torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_max_value)
       optimizer.step()
   return loss.item()
 
@@ -257,6 +269,9 @@ def eval(model, device, loader, evaluator, save_model_results=False, save_filena
                   seen.add(adjusted_ind)
   y_true = torch.cat(y_true, dim=0).numpy()
   y_pred = torch.cat(y_pred, dim=0).numpy()
+  ap_score = average_precision_score(y_true, y_pred)
+  chance_ap = y_true.sum()/len(y_true)
+  print(f"average precision (AP) score of {ap_score:.6f} (chance level is {chance_ap:.6f})")
   input_dict = {"y_true": y_true.reshape(-1, 1) if batch.y.shape[1] == 1 else y_true, "y_pred": y_pred.reshape(-1, 1) if batch.y.shape[1] == 1 else y_pred}
   if save_model_results:
       data = {
@@ -286,6 +301,7 @@ def eval(model, device, loader, evaluator, save_model_results=False, save_filena
       PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
       plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
       precision_recall_display_filename = f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE{figure_save_tag}.png"
+      plt.legend(loc="upper right")
       plt.savefig(precision_recall_display_filename)
       ap_score = average_precision_score(y_true, y_pred)
       chance_ap = y_true.sum()/len(y_true)
@@ -341,4 +357,3 @@ print(f'Best model for {config["dataset_id"]} (eval metric {dataset.eval_metric}
 if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check:
     print(f"Train subset held out as dev for generalization check: {dev_metric:.6f}")
 print(f"parameter count: {sum(p.numel() for p in best_model.parameters())}")
-
