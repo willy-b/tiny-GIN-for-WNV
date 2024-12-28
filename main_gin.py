@@ -1,6 +1,6 @@
 from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
 from ogb.graphproppred.mol_encoder import AtomEncoder
-from prep_pcba_577.prep import convert_aid_577_into_ogb_dataset
+from prep_pcba.prep import convert_aid_into_ogb_dataset
 
 import torch
 import torch_geometric
@@ -23,6 +23,7 @@ from pathlib import Path
 import argparse
 
 argparser = argparse.ArgumentParser()
+argparser.add_argument("--aid_id", type=str, default='577')
 # Set this to 'cpu' if you NEED to reproduce exact numbers.
 argparser.add_argument("--device", type=str, default='cpu')
 argparser.add_argument("--num_layers", type=int, default=2)
@@ -75,24 +76,27 @@ if not use_scaffold_split and not use_random_split:
     print("You must either specify `--use_scaffold_split` (harder) or `--use_random_split` (easier)")
 
 # check if splits already exist
-data_path = Path("local_ogbg_pcba_aid_577")
+data_path = Path(f"local_ogbg_pcba_aid_{args.aid_id}")
 if not data_path.exists() or not data_path.is_dir():
-    meta_dict = convert_aid_577_into_ogb_dataset(use_scaffold_split=use_scaffold_split, scaffold_split_seed=split_seed)
+    meta_dict = convert_aid_into_ogb_dataset(use_scaffold_split=use_scaffold_split, scaffold_split_seed=split_seed, aid_id=args.aid_id)
 else:
     if args.random_seed_for_data_splits != None:
         raise Exception(f"Data is already split into train/valid/test but `--random_seed_for_data_splits` argument is set, if you intend to split the data according to the specified seed and it is not the current split, please remove `{data_path}` folder and run again or if you want to reuse the existing split remove the `--random_seed_for_data_splits` argument. If you do not know what to do and you are seeing this message, you should probably remove the `{data_path}` folder (this is the safest route if copy pasting a command which includes that argument).")
     # default data is available, use that
-    meta_dict = {'version': 0, 'dir_path': 'local_ogbg_pcba_aid_577/pcba_aid_577', 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'scaffold-80-10-10' if use_scaffold_split else 'random-80-10-10', 'download_name': 'pcba_aid_577', 'url': 'https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_577.zip', 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
-dataset = PygGraphPropPredDataset(name="ogbg-pcba-aid-577", root="local", transform=None, meta_dict=meta_dict)
+    meta_dict = {'version': 0, 'dir_path': f"local_ogbg_pcba_aid_{args.aid_id}/pcba_aid_{args.aid_id}", 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'scaffold-80-10-10' if use_scaffold_split else 'random-80-10-10', 'download_name': f"pcba_aid_{args.aid_id}", 'url': f"https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_{args.aid_id}.zip", 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
+dataset = PygGraphPropPredDataset(name=f"ogbg-pcba-aid-{args.aid_id}", root="local", transform=None, meta_dict=meta_dict)
 evaluator = Evaluator(name="ogbg-molhiv") # intentionally use ogbg-molhiv evaluator for ogbg-pcba-aid-577 since we have put data in same format (single task, binary output molecular/graph property prediction)
 
 # for looking up SMILES strings to include in the output CSV with scores
-aid577 = pd.read_csv("prep_pcba_577/AID_577_datatable.csv")
-smiles_list = aid577["PUBCHEM_EXT_DATASOURCE_SMILES"].values[3:] # see below, 1-based index of this data starts at index 3, so that should be zero-index in our zero-based index smiles list
-smiles_entry_tags = aid577["PUBCHEM_RESULT_TAG"]
-assert int(smiles_entry_tags[3]) == 1 # 1-based index of data starts at index 3
-assert int(smiles_entry_tags[4]) == 2 # 1-based index of data starts at index 3
-assert int(smiles_entry_tags[5]) == 3 # 1-based index of data starts at index 3
+aid_data = pd.read_csv(f"prep_pcba/AID_{args.aid_id}_datatable.csv")
+if int(args.aid_id) != 577 and int(args.aid_id) != 588689:
+  raise Exception("unsupported AID ID; must be 577 or 588689 at present")
+smiles_list = aid_data["PUBCHEM_EXT_DATASOURCE_SMILES"].values[(3 if int(args.aid_id) == 577 else 4):] # see below, 1-based index of this data starts at index 3, so that should be zero-index in our zero-based index smiles list
+smiles_entry_tags = aid_data["PUBCHEM_RESULT_TAG"]
+if int(args.aid_id) == 577:
+  assert int(smiles_entry_tags[3]) == 1 # 1-based index of data starts at index 3
+  assert int(smiles_entry_tags[4]) == 2 # 1-based index of data starts at index 3
+  assert int(smiles_entry_tags[5]) == 3 # 1-based index of data starts at index 3
 
 if args.random_seed != None:
     set_seeds(args.random_seed)
@@ -100,7 +104,7 @@ if args.random_seed != None:
 config = {
  # Set this to 'cpu' if you NEED to reproduce exact numbers.
  'device': args.device,
- 'dataset_id': 'ogbg-pcba-aid-577',
+ 'dataset_id': f"ogbg-pcba-aid-{args.aid_id}",
  'num_layers': args.num_layers,
  'hidden_dim': args.hidden_dim,
  'dropout': args.dropout_p,
@@ -290,17 +294,19 @@ def eval(model, device, loader, evaluator, save_model_results=False, save_filena
       RocCurveDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
       using_graphnorm_filename_string = "_and_GraphNorm" if config['use_graph_norm'] else ""
       using_graphnorm_title_string = " with GraphNorm" if config['use_graph_norm'] else ""
-      plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
+      target_description = "West Nile Virus NS2bNS3 Proteinase" if int(args.aid_id) == 577 else ("Flavivirus Genome Capping Enzyme" if int(args.aid_id) == 588689 else "the target")
+      target_description_filename = "WNV_NS2bNS3_Proteinase_Inhibition" if int(args.aid_id) == 577 else ("Flavivirus_Genome_Capping_Enzyme_Inhibition" if int(args.aid_id) == 588689 else "target_inhibition")
+      plt.title(f"Predicting if molecules inhibit {target_description}\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
       if figure_save_tag != "":
           figure_save_tag = f"_{figure_save_tag}"
-      rocauc_figure_filename = f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE{figure_save_tag}.png"
+      rocauc_figure_filename = f"{target_description_filename}_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE{figure_save_tag}.png"
       plt.savefig(rocauc_figure_filename)
       rocauc_score = roc_auc_score(y_true, y_pred)
       print(f"Generated {rocauc_figure_filename}\nshowing Receiver Operating Characteristic Area Under the Curve (ROCAUC) score of {rocauc_score:.6f} (chance level is {0.5:.6f})")
       plt.show()
       PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-      plt.title(f"Predicting if molecules inhibit West Nile Virus NS2bNS3 Proteinase\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
-      precision_recall_display_filename = f"WNV_NS2bNS3_Proteinase_Inhibition_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE{figure_save_tag}.png"
+      plt.title(f"Predicting if molecules inhibit {target_description}\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
+      precision_recall_display_filename = f"{target_description_filename}_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE{figure_save_tag}.png"
       plt.legend(loc="upper right")
       plt.savefig(precision_recall_display_filename)
       ap_score = average_precision_score(y_true, y_pred)

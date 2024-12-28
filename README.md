@@ -72,6 +72,11 @@ Notes:
 PubChem Identifier: AID 577
 URL: https://pubchem.ncbi.nlm.nih.gov/bioassay/577
 
+### PubChem BioAssay: Primary and Confirmatory Screening for Flavivirus Genomic Capping Enzyme Inhibition
+
+PubChem Identifier: AID 588689
+URL: https://pubchem.ncbi.nlm.nih.gov/bioassay/588689
+
 ### PyTorch Geometric
 
 - Fey, Matthias and Lenssen, Jan E. Fast Graph Representation Learning with PyTorch Geometric. ICLR Workshop on Representation Learning on Graphs and Manifolds, 2019. (Graph Isomorphism Network (GIN) implementation used)
