@@ -1,4 +1,4 @@
-# tiny-GIN-for-PCBA-577-WNV
+# tiny-GIN-for-WNV
 
 **WORK IN PROGRESS REPO, NOT FOR ANY COMPETITION**
 
@@ -17,9 +17,9 @@ I will start by considering the West Nile Virus related dataset "HTS to identify
 The dataset is from 2006, but see also the 2021 paper "Targeting the protease of West Nile virus" ( Voss and Nitsche 2021 , https://pmc.ncbi.nlm.nih.gov/articles/PMC8372202/ ) 
 for a review of why the NS2bNS3 proteinase is still a promising target for WNV antivirals.
 
-We can put that into OGB format for consistency and test a similar tiny Graph Isomorphism Network (GIN) on it.
+We can put that into OGB format for consistency and test a similar tiny Graph Isomorphism Network (GIN) on it. More datasets are coming as AID 577 only has 119 active molecules - see https://github.com/willy-b/tiny-GIN-for-WNV/pull/14 for incoming support of AID 588689 ( https://pubchem.ncbi.nlm.nih.gov/bioassay/588689 ) which has over 1000 active molecules (that inhibit the flavivirus genome capping enzyme).
 
-NOTE THERE IS NO COMPETITION ASSOCIATED WITH THIS DATASET THAT I AM AWARE OF, THIS IS JUST FOR INTEREST IN THE PROBLEM UNLIKE THE OGBG-MOLHIV REPO.
+NOTE THERE ARE NO COMPETITIONS ASSOCIATED WITH THESE DATASETS THAT I AM AWARE OF, THIS IS JUST FOR INTEREST IN THE PROBLEM UNLIKE THE OGBG-MOLHIV REPO.
 
 # Trying it out
 
@@ -55,9 +55,11 @@ pip install ogb # I'm using 1.3.6 right now
 
 Notes:
 
-- when evaluating the average precision, note that the base rate is <0.2% so e.g. average precision of 9% is pretty good and getting a hit with a very high score immediately as the first result is unlikely to happen by chance
+- The above does not use the more challenging molecular structure scaffold split used by MoleculeNet for their benchmarks (like in the ogbg-molhiv challenge) which ensure that the model is not just matching extremely similar molecules that got divided into the train vs valid or test split and instead ensures generalization is occurring. Support for a scaffold split via MoleculeNet's contribution to the DeepChem library is coming in https://github.com/willy-b/tiny-GIN-for-WNV/pull/14 .
 
-- the weight decay was technically `512e-6` for those examples instead of default `5e-4` because I was using powers of 2 multiplied by 1e-6 but should be an insignificant difference and rest of parameters were current defaults. running the defaults several times should produce similar results.
+- When evaluating the average precision, note that the base rate is <0.2% so e.g. average precision of 9% is pretty good and getting a hit with a very high score immediately as the first result is unlikely to happen by chance.
+
+- The weight decay was technically `512e-6` for those examples instead of default `5e-4` because I was using powers of 2 multiplied by 1e-6 but should be an insignificant difference and rest of parameters were current defaults. running the defaults several times should produce similar results.
 
 **Note, I will use the default split and report on random splits when I eventually evaluate this though I support in the code a fixed train/valid/test split, due to different hardwares giving different random numbers for some generators causing me to be paranoid about myself or others seeing summary statistics from different random splits (unlike for the OGB competition in other repo (ogbg-molhiv) where the splits are preset by the authority).**
 
