@@ -29,7 +29,9 @@ argparser.add_argument("--device", type=str, default='cpu')
 argparser.add_argument("--num_layers", type=int, default=2)
 argparser.add_argument("--hidden_dim", type=int, default=8) # very small number of active molecule examples, do not want to overfit any particular scaffold, need to lower parameter count vs ogbg-molhiv solution with more than 10x active fraction, reducing to 12d gets us 1/10th the parameters, scaling down parameters with data, found going down to 8d with other adjustments was possible
 argparser.add_argument("--learning_rate", type=float, default=0.001)
-argparser.add_argument("--grad_clip_max_value", type=float, default=5e-3)
+# 5e-3 is a good starting value for grad_norm_clip_max_value for this problem (large effect during early steps right after weight initialization, much smaller effect later in training), however trying to avoid having too many hyperparameters and this is less important, if there is large variance between random seeds depending on initialization, this may help.
+# One can request access to e.g. https://colab.research.google.com/drive/10HPg51Sv27FJjzWQqNzqRpT0WuLYmHzy to see logged max and median gradient norm values before and after clipping throughout a training run.
+argparser.add_argument("--grad_norm_clip_max_value", type=float, default=None) 
 argparser.add_argument("--dropout_p", type=float, default=0.5)
 argparser.add_argument("--epochs", type=int, default=120) # not enough data for many epochs to be useful, but we have early stopping built in (saves best valid score). recommend to set to 10 for scaffold split where overfitting to a particular set of scaffolds is a real problem if it runs too many epochs.
 argparser.add_argument("--batch_size", type=int, default=1024) # needs large batches since < 0.2% of the data is active molecules otherwise almost all batches will be all inactives
@@ -112,7 +114,7 @@ config = {
  'epochs': args.epochs,
  'batch_size': args.batch_size,
  'weight_decay': args.weight_decay,
- 'grad_clip_max_value': args.grad_clip_max_value,
+ 'grad_norm_clip_max_value': args.grad_norm_clip_max_value,
  'split_type': 'scaffold' if args.use_scaffold_split else 'random'
 }
 device = config["device"]
@@ -244,8 +246,8 @@ def train(model, device, data_loader, optimizer, loss_fn):
       else:
         loss = loss_fn(out[non_nan], batch_y[non_nan])
       loss.backward()
-      if args.grad_clip_max_value != None:
-          torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_max_value)
+      if args.grad_norm_clip_max_value != None:
+          torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip_max_value)
       optimizer.step()
   return loss.item()
 
