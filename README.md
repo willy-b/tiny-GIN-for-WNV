@@ -1,4 +1,4 @@
-# tiny-GIN-for-PCBA-577-WNV
+# tiny-GIN-for-WNV
 
 **WORK IN PROGRESS REPO, NOT FOR ANY COMPETITION**
 
@@ -47,6 +47,7 @@ See also regarding MoleculeNet's use of scaffold split for their HIV antiviral d
 Note that once the molecules in the dataset are mapped to their scaffolds, which scaffolds go into which split can still be randomized, and we support a splitting seed for that.
 
 NOTE THERE ARE NO COMPETITIONS ASSOCIATED WITH THESE DATASETS THAT I AM AWARE OF, THIS IS JUST FOR INTEREST IN THE PROBLEM UNLIKE THE OGBG-MOLHIV REPO, though I am going to try to writeup https://pubchem.ncbi.nlm.nih.gov/bioassay/588689 and contribute it back to OGB team after evaluating their baseline models on it.
+
 
 # Trying it out
 
