@@ -23,17 +23,17 @@ from pathlib import Path
 import argparse
 
 argparser = argparse.ArgumentParser()
-argparser.add_argument("--aid_id", type=str, default='577')
+argparser.add_argument("--aid_id", type=str, default='588689')
 # Set this to 'cpu' if you NEED to reproduce exact numbers.
 argparser.add_argument("--device", type=str, default='cpu')
 argparser.add_argument("--num_layers", type=int, default=2)
-argparser.add_argument("--hidden_dim", type=int, default=8) # very small number of active molecule examples, do not want to overfit any particular scaffold, need to lower parameter count vs ogbg-molhiv solution with more than 10x active fraction, reducing to 12d gets us 1/10th the parameters, scaling down parameters with data, found going down to 8d with other adjustments was possible
+argparser.add_argument("--hidden_dim", type=int, default=8) # very small number of active molecule examples, for e.g. AID 577, do not want to overfit any particular scaffold, need to lower parameter count vs ogbg-molhiv solution with more than 10x active fraction, reducing to 12d gets us 1/10th the parameters, scaling down parameters with data, found going down to 8d with other adjustments was possible
 argparser.add_argument("--learning_rate", type=float, default=0.001)
 # 5e-3 is a good starting value for grad_norm_clip_max_value for this problem (large effect during early steps right after weight initialization, much smaller effect later in training), however trying to avoid having too many hyperparameters and this is less important, if there is large variance between random seeds depending on initialization, this may help.
 # One can request access to e.g. https://colab.research.google.com/drive/10HPg51Sv27FJjzWQqNzqRpT0WuLYmHzy to see logged max and median gradient norm values before and after clipping throughout a training run.
 argparser.add_argument("--grad_norm_clip_max_value", type=float, default=None) 
 argparser.add_argument("--dropout_p", type=float, default=0.5)
-argparser.add_argument("--epochs", type=int, default=120) # not enough data for many epochs to be useful, but we have early stopping built in (saves best valid score). recommend to set to 10 for scaffold split where overfitting to a particular set of scaffolds is a real problem if it runs too many epochs.
+argparser.add_argument("--epochs", type=int, default=50)
 argparser.add_argument("--batch_size", type=int, default=1024) # needs large batches since < 0.2% of the data is active molecules otherwise almost all batches will be all inactives
 argparser.add_argument("--weight_decay", type=float, default=1e-6) # learning from very few examples (<100 active examples total), increase regularization to avoid overfitting
 argparser.add_argument("--random_seed", type=int, default=None)
@@ -73,9 +73,13 @@ use_scaffold_split = args.use_scaffold_split
 use_random_split = args.use_random_split
 if use_scaffold_split and use_random_split:
     print("You cannot specify both `--use_scaffold_split` and `--use_random_split`, please choose one!")
+    raise Exception("You cannot specify both `--use_scaffold_split` and `--use_random_split`, please choose one!")
 
 if not use_scaffold_split and not use_random_split:
     print("You must either specify `--use_scaffold_split` (harder) or `--use_random_split` (easier)")
+    raise Exception("You must either specify `--use_scaffold_split` (harder) or `--use_random_split` (easier)")
+
+# if throwing exceptions above is removed, it would default to the random split (what it was doing before https://github.com/willy-b/tiny-GIN-for-WNV/pull/14 )
 
 # check if splits already exist
 data_path = Path(f"local_ogbg_pcba_aid_{args.aid_id}")
