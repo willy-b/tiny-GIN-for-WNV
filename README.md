@@ -31,13 +31,13 @@ https://pubchem.ncbi.nlm.nih.gov/bioassay/577
 The dataset is from 2006, but see also the 2021 paper "Targeting the protease of West Nile virus" ( Voss and Nitsche 2021 , https://pmc.ncbi.nlm.nih.gov/articles/PMC8372202/ ) 
 for a review of why the NS2bNS3 proteinase is still a promising target for WNV antivirals.
 
-We can put these datasets into OGB format and use a Murcko scaffold split (same as MoleculeNet team did for molhiv dataset used by OGB team for ogbg-molhiv) to ensure the model is learning to generalize its predictions to non-similar molecules (not just matching similar molecules in the training set).
+We can put these datasets into OGB format and use a Bemis-Murcko scaffold split (same as MoleculeNet team did for molhiv dataset used by OGB team for ogbg-molhiv) to ensure the model is learning to generalize its predictions to non-similar molecules (not just matching similar molecules in the training set).
 
 ### Scaffold splitting details
 
 We are using a scaffold split since https://github.com/willy-b/tiny-GIN-for-WNV/pull/14 (Note AID 577 may not have sufficient data to analyze under scaffold split, since it only has 119 active molecules total), prior to that was using a random split for AID 577 and AID 588689 had not yet been added.
 
-For Murcko scaffold splitting, we use https://deepchem.readthedocs.io/en/2.8.0/api_reference/splitters.html#scaffoldsplitter per "MoleculeNet: a benchmark for molecular machine learning" ( https://pubs.rsc.org/en/content/articlehtml/2018/sc/c7sc02664a ) section 3.2 Data Splitting: "Scaffold splitting splits the samples based on their two-dimensional structural frameworks [...] MoleculeNet contributes the code for these splitting methods into DeepChem. "
+For Bemis-Murcko scaffold splitting, we use https://deepchem.readthedocs.io/en/2.8.0/api_reference/splitters.html#scaffoldsplitter per "MoleculeNet: a benchmark for molecular machine learning" ( https://pubs.rsc.org/en/content/articlehtml/2018/sc/c7sc02664a ) section 3.2 Data Splitting: "Scaffold splitting splits the samples based on their two-dimensional structural frameworks [...] MoleculeNet contributes the code for these splitting methods into DeepChem. "
 
 See also regarding MoleculeNet's use of scaffold split for their HIV antiviral dataset, section 3.1.9
 "As we are more interested in discover new categories of HIV inhibitors, scaffold splitting (introduced in the next subsection) is recommended for this dataset."**
@@ -119,6 +119,22 @@ URL: https://pubchem.ncbi.nlm.nih.gov/bioassay/577
 (note only the OGB data format and evaluator are used here, this is NOT an ogb dataset and not to be confused with their ogbg-molpcba which is 128 selected pubchem bioassays NOT including AID 577 we consider here)
 
 - Hu, Weihua and Fey, Matthias and Zitnik, Marinka and Dong, Yuxiao and Ren, Hongyu and Liu, Bowen and Catasta, Michele and Leskovec, Jure. Open Graph Benchmark: Datasets for Machine Learning on Graphs. arXiv preprint arXiv:2005.00687, 2020.
+
+### DeepChem ScaffoldSplitter (for scaffold splitting per MoleculeNet)
+
+https://deepchem.readthedocs.io/en/2.8.0/api_reference/splitters.html#scaffoldsplitter 
+
+They recommend citing their book:
+
+- Bharath Ramsundar and Peter Eastman and Patrick Walters and Vijay Pande and Karl Leswing and Zhenqin Wu. Deep Learning for the Life Sciences. O'Reilly Media, 2019.
+
+MoleculeNet explanation of Scaffold Splitting for their molhiv dataset (used by ogbg-molhiv), sections 3.1.9 and 3.2 Data Splitting from:
+
+- Wu, Z., Ramsundar, B., Feinberg, E. N., Gomes, J., Geniesse, C., Pappu, A. S., ... & Pande, V. (2018). MoleculeNet: a benchmark for molecular machine learning. Chemical science, 2018.
+
+Original reference for Bemis-Murcko scaffold definitions:
+
+- Bemis, Guy W and Murcko, Mark A. The properties of known drugs. 1. Molecular frameworks. Journal of Medicinal Chemistry, 1996.
 
 ## Acknowledgements
 
