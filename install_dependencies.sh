@@ -5,3 +5,4 @@ pip install torch-geometric
 pip install ogb
 pip install rdkit
 pip install scikit-learn>=1.3
+pip install deepchem==2.8.0 # only used for scaffold splitting
