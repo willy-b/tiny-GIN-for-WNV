@@ -27,14 +27,14 @@ argparser.add_argument("--aid_id", type=str, default='588689')
 # Set this to 'cpu' if you NEED to reproduce exact numbers.
 argparser.add_argument("--device", type=str, default='cpu')
 argparser.add_argument("--num_layers", type=int, default=2)
-argparser.add_argument("--hidden_dim", type=int, default=8) # very small number of active molecule examples, for e.g. AID 577, do not want to overfit any particular scaffold, need to lower parameter count vs ogbg-molhiv solution with more than 10x active fraction, reducing to 12d gets us 1/10th the parameters, scaling down parameters with data, found going down to 8d with other adjustments was possible
+argparser.add_argument("--hidden_dim", type=int, default=64) # set default to configuration with good balance of performance on validation (dim=8 is recommended for quick checks and for testing on new datasets)
 argparser.add_argument("--learning_rate", type=float, default=0.001)
 # 5e-3 is a good starting value for grad_norm_clip_max_value for this problem (large effect during early steps right after weight initialization, much smaller effect later in training), however trying to avoid having too many hyperparameters and this is less important, if there is large variance between random seeds depending on initialization, this may help.
 # One can request access to e.g. https://colab.research.google.com/drive/10HPg51Sv27FJjzWQqNzqRpT0WuLYmHzy to see logged max and median gradient norm values before and after clipping throughout a training run.
 argparser.add_argument("--grad_norm_clip_max_value", type=float, default=None) 
 argparser.add_argument("--dropout_p", type=float, default=0.5)
 argparser.add_argument("--epochs", type=int, default=50)
-argparser.add_argument("--batch_size", type=int, default=1024) # needs large batches since < 0.2% of the data is active molecules otherwise almost all batches will be all inactives
+argparser.add_argument("--batch_size", type=int, default=128) # needs larger batches since < 0.2% of the data is active molecules otherwise almost all batches will be all inactives (recommend 1024 if using even smaller hidden_dim e.g. dim=8, this is still larger than 32 batchsize used for ogbg-molhiv)
 argparser.add_argument("--weight_decay", type=float, default=1e-6) # learning from very few examples (<100 active examples total), increase regularization to avoid overfitting
 argparser.add_argument("--random_seed", type=int, default=None)
 argparser.add_argument("--random_seed_for_data_splits", type=int, default=None) # default uses 0 but resplits if set explicitly
@@ -51,6 +51,7 @@ argparser.add_argument("--use_random_split", action="store_true")
 argparser.add_argument("--active_class_weight", type=float, default=1.0)
 argparser.add_argument("--disable_graph_norm", action="store_true")
 argparser.add_argument("--hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check", action="store_true")
+argparser.add_argument("--eval_on_test_set", action="store_true")
 args = argparser.parse_args()
 
 # Let's set a random seed for reproducibility
@@ -91,18 +92,18 @@ else:
     # default data is available, use that
     meta_dict = {'version': 0, 'dir_path': f"local_ogbg_pcba_aid_{args.aid_id}/pcba_aid_{args.aid_id}", 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'scaffold-80-10-10' if use_scaffold_split else 'random-80-10-10', 'download_name': f"pcba_aid_{args.aid_id}", 'url': f"https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_{args.aid_id}.zip", 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
 dataset = PygGraphPropPredDataset(name=f"ogbg-pcba-aid-{args.aid_id}", root="local", transform=None, meta_dict=meta_dict)
-evaluator = Evaluator(name="ogbg-molhiv") # intentionally use ogbg-molhiv evaluator for ogbg-pcba-aid-577 since we have put data in same format (single task, binary output molecular/graph property prediction)
+evaluator = Evaluator(name="ogbg-molhiv") # intentionally use ogbg-molhiv evaluator for ogbg-pcba-aid-577 or ogbg-pcba-aid-588689 since we have put data in same format (single task, binary output molecular/graph property prediction)
 
 # for looking up SMILES strings to include in the output CSV with scores
 aid_data = pd.read_csv(f"prep_pcba/AID_{args.aid_id}_datatable.csv")
 if int(args.aid_id) != 577 and int(args.aid_id) != 588689:
-  raise Exception("unsupported AID ID; must be 577 or 588689 at present")
+    raise Exception("unsupported AID ID; must be 577 or 588689 at present")
 smiles_list = aid_data["PUBCHEM_EXT_DATASOURCE_SMILES"].values[(3 if int(args.aid_id) == 577 else 4):] # see below, 1-based index of this data starts at index 3, so that should be zero-index in our zero-based index smiles list
 smiles_entry_tags = aid_data["PUBCHEM_RESULT_TAG"]
 if int(args.aid_id) == 577:
-  assert int(smiles_entry_tags[3]) == 1 # 1-based index of data starts at index 3
-  assert int(smiles_entry_tags[4]) == 2 # 1-based index of data starts at index 3
-  assert int(smiles_entry_tags[5]) == 3 # 1-based index of data starts at index 3
+    assert int(smiles_entry_tags[3]) == 1 # 1-based index of data starts at index 3
+    assert int(smiles_entry_tags[4]) == 2 # 1-based index of data starts at index 3
+    assert int(smiles_entry_tags[5]) == 3 # 1-based index of data starts at index 3
 
 if args.random_seed != None:
     set_seeds(args.random_seed)
@@ -150,6 +151,9 @@ while not adequate_split:
             print(f"Found working generalization check hold out from training data; has {gen_labels.sum()} active molecules vs valid which has {valid_labels.sum()} active molecules")
 
 valid_split = split_idx["valid"]
+test_split = None
+if args.eval_on_test_set:
+    test_split = split_idx["test"]
 
 dev_split = None if not args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check else full_train_split[:len(split_idx["valid"])]# NOT TEST, this is taking some of the existing training split
 train_loader = DataLoader(dataset[train_split], batch_size=config["batch_size"], shuffle=True)
@@ -158,6 +162,9 @@ dev_loader = None
 if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check:
     print(f"Held out {len(dev_split)} datapoints from training split as a final generalization check after selecting best model (similar to early stopping) using valid split")
     dev_loader = DataLoader(dataset[dev_split], batch_size=config["batch_size"], shuffle=False)
+test_loader = None
+if args.eval_on_test_set:
+    test_loader = DataLoader(dataset[test_split], batch_size=config["batch_size"], shuffle=False)
 
 config["use_graph_norm"] = not args.disable_graph_norm # on by default
 
@@ -170,156 +177,155 @@ print(f"config: {config}")
 # computes a node embedding using GINConv layers, then uses pooling to predict graph level properties
 class GINGraphPropertyModel(torch.nn.Module):
     def __init__(self, hidden_dim, output_dim, num_layers, dropout_p, return_node_embed=False):
-      super(GINGraphPropertyModel, self).__init__()
-      # fields used for computing node embedding
-      self.node_encoder = AtomEncoder(hidden_dim)
-      self.return_node_embed = return_node_embed
-      self.convs = torch.nn.ModuleList(
+        super(GINGraphPropertyModel, self).__init__()
+        # fields used for computing node embedding
+        self.node_encoder = AtomEncoder(hidden_dim)
+        self.return_node_embed = return_node_embed
+        self.convs = torch.nn.ModuleList(
           [torch_geometric.nn.conv.GINConv(MLP([hidden_dim, hidden_dim, hidden_dim])) for idx in range(0, num_layers)]
-      )
-      if config['use_graph_norm']:
-          self.bns = torch.nn.ModuleList(
+        )
+        if config['use_graph_norm']:
+            self.bns = torch.nn.ModuleList(
               [GraphNorm(hidden_dim) for idx in range(0, num_layers - 1)],
-          )
-      else:
-          self.bns = torch.nn.ModuleList(
+            )
+        else:
+            self.bns = torch.nn.ModuleList(
               [torch.nn.BatchNorm1d(hidden_dim) for idx in range(0, num_layers - 1)]
-          )
-      self.dropout_p = dropout_p
-      # end fields used for computing node embedding
-      # fields for graph embedding
-      self.pool = global_add_pool
-      self.linear_hidden = torch.nn.Linear(hidden_dim, hidden_dim)
-      self.linear_out = torch.nn.Linear(hidden_dim, output_dim)
-      # end fields for graph embedding
+            )
+        self.dropout_p = dropout_p
+        # end fields used for computing node embedding
+        # fields for graph embedding
+        self.pool = global_add_pool
+        self.linear_hidden = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.linear_out = torch.nn.Linear(hidden_dim, output_dim)
+        # end fields for graph embedding
     def reset_parameters(self):
-      for conv in self.convs:
-        conv.reset_parameters()
-      for bn in self.bns:
-        bn.reset_parameters()
-      self.linear_hidden.reset_parameters()
-      self.linear_out.reset_parameters()
+        for conv in self.convs:
+            conv.reset_parameters()
+        for bn in self.bns:
+            bn.reset_parameters()
+        self.linear_hidden.reset_parameters()
+        self.linear_out.reset_parameters()
     def forward(self, x, edge_index, batch):
-      #x, edge_index, batch = batched_data.x, batched_data.edge_index, batched_data.batch
-      # compute node embedding
-      x = self.node_encoder(x)
-      for idx in range(0, len(self.convs)):
-        x = self.convs[idx](x, edge_index)
-        if idx < len(self.convs) - 1:
-          if config['use_graph_norm']:
-              x = self.bns[idx](x, batch)
-          else:
-              x = self.bns[idx](x)
-          x = torch.nn.functional.relu(x)
-          x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
-      # note x is raw logits, NOT softmax'd
-      # end computation of node embedding
-      if self.return_node_embed == True:
-        return x
-      # convert node embedding to a graph level embedding using pooling
-      x = self.pool(x, batch)
-      x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
-      # transform the graph embedding to the output dimension
-      # MLP after graph embed ensures we are not requiring the raw pooled node embeddings to be linearly separable
-      x = self.linear_hidden(x)
-      x = torch.nn.functional.relu(x)
-      x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
-      out = self.linear_out(x)
-      return out
+        # compute node embedding
+        x = self.node_encoder(x)
+        for idx in range(0, len(self.convs)):
+            x = self.convs[idx](x, edge_index)
+            if idx < len(self.convs) - 1:
+                if config['use_graph_norm']:
+                    x = self.bns[idx](x, batch)
+                else:
+                    x = self.bns[idx](x)
+                x = torch.nn.functional.relu(x)
+                x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
+        # note x is raw logits, NOT softmax'd
+        # end computation of node embedding
+        if self.return_node_embed == True:
+            return x
+        # convert node embedding to a graph level embedding using pooling
+        x = self.pool(x, batch)
+        x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
+        # transform the graph embedding to the output dimension
+        # MLP after graph embed ensures we are not requiring the raw pooled node embeddings to be linearly separable
+        x = self.linear_hidden(x)
+        x = torch.nn.functional.relu(x)
+        x = torch.nn.functional.dropout(x, self.dropout_p, training=self.training)
+        out = self.linear_out(x)
+        return out
 
 # can be used with multiple task outputs (like for molpcba) or single task output;
 # and supports using just the first output of a multi-task model if applied to a single task (for pretraining molpcba and transferring to molhiv)
 def train(model, device, data_loader, optimizer, loss_fn):
-  model.train()
-  for step, batch in enumerate(tqdm(data_loader, desc="Training batch")):
-    batch = batch.to(device)
-    if batch.x.shape[0] != 1 and batch.batch[-1] != 0:
-      # ignore nan targets (unlabeled) when computing training loss.
-      non_nan = batch.y == batch.y
-      loss = None
-      optimizer.zero_grad()
-      out = model(batch.x, batch.edge_index, batch.batch)
-      non_nan = non_nan[:min(non_nan.shape[0], out.shape[0])]
-      batch_y = batch.y[:out.shape[0], :]
-      # for crudely adapting multitask models to single task data
-      if batch.y.shape[1] == 1:
-        out = out[:, 0]
-        batch_y = batch_y[:, 0]
-        non_nan = batch_y == batch_y
-        loss = loss_fn(out[non_nan].reshape(-1, 1)*1., batch_y[non_nan].reshape(-1, 1)*1.)
-      else:
-        loss = loss_fn(out[non_nan], batch_y[non_nan])
-      loss.backward()
-      if args.grad_norm_clip_max_value != None:
-          torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip_max_value)
-      optimizer.step()
-  return loss.item()
+    model.train()
+    for step, batch in enumerate(tqdm(data_loader, desc="Training batch")):
+        batch = batch.to(device)
+        if batch.x.shape[0] != 1 and batch.batch[-1] != 0:
+            # ignore nan targets (unlabeled) when computing training loss.
+            non_nan = batch.y == batch.y
+            loss = None
+            optimizer.zero_grad()
+            out = model(batch.x, batch.edge_index, batch.batch)
+            non_nan = non_nan[:min(non_nan.shape[0], out.shape[0])]
+            batch_y = batch.y[:out.shape[0], :]
+            # for crudely adapting multitask models to single task data
+            if batch.y.shape[1] == 1:
+                out = out[:, 0]
+                batch_y = batch_y[:, 0]
+                non_nan = batch_y == batch_y
+                loss = loss_fn(out[non_nan].reshape(-1, 1)*1., batch_y[non_nan].reshape(-1, 1)*1.)
+            else:
+                loss = loss_fn(out[non_nan], batch_y[non_nan])
+            loss.backward()
+            if args.grad_norm_clip_max_value != None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip_max_value)
+            optimizer.step()
+    return loss.item()
 
 def eval(model, device, loader, evaluator, save_model_results=False, save_filename=None, split_indices=[], plot_metrics=False, figure_save_tag=""):
-  model.eval()
-  y_true = []
-  y_pred = []
-  indices = []
-  seen = set()
-  for step, batch in enumerate(tqdm(loader, desc="Evaluation batch")):
-      batch = batch.to(device)
-      with torch.no_grad():
-          pred = model(batch.x, batch.edge_index, batch.batch)
-          # for crudely adapting multitask models to single task data
-          if batch.y.shape[1] == 1:
-            pred = pred[:, 0]
-          batch_y = batch.y[:min(pred.shape[0], batch.y.shape[0])]
-          y_true.append(batch_y.view(pred.shape).detach().cpu())
-          y_pred.append(pred.detach().cpu())
-          offset = len(seen)
-          for ind in batch.batch:
-              adjusted_ind = ind.item() + offset
-              if not adjusted_ind in seen:
-                  indices.append(adjusted_ind)
-                  seen.add(adjusted_ind)
-  y_true = torch.cat(y_true, dim=0).numpy()
-  y_pred = torch.cat(y_pred, dim=0).numpy()
-  ap_score = average_precision_score(y_true, y_pred)
-  chance_ap = y_true.sum()/len(y_true)
-  print(f"average precision (AP) score of {ap_score:.6f} (chance level is {chance_ap:.6f})")
-  input_dict = {"y_true": y_true.reshape(-1, 1) if batch.y.shape[1] == 1 else y_true, "y_pred": y_pred.reshape(-1, 1) if batch.y.shape[1] == 1 else y_pred}
-  if save_model_results:
-      data = {
+    model.eval()
+    y_true = []
+    y_pred = []
+    indices = []
+    seen = set()
+    for step, batch in enumerate(tqdm(loader, desc="Evaluation batch")):
+        batch = batch.to(device)
+        with torch.no_grad():
+            pred = model(batch.x, batch.edge_index, batch.batch)
+            # for crudely adapting multitask models to single task data
+            if batch.y.shape[1] == 1:
+                pred = pred[:, 0]
+            batch_y = batch.y[:min(pred.shape[0], batch.y.shape[0])]
+            y_true.append(batch_y.view(pred.shape).detach().cpu())
+            y_pred.append(pred.detach().cpu())
+            offset = len(seen)
+            for ind in batch.batch:
+                adjusted_ind = ind.item() + offset
+                if not adjusted_ind in seen:
+                    indices.append(adjusted_ind)
+                    seen.add(adjusted_ind)
+    y_true = torch.cat(y_true, dim=0).numpy()
+    y_pred = torch.cat(y_pred, dim=0).numpy()
+    ap_score = average_precision_score(y_true, y_pred)
+    chance_ap = y_true.sum()/len(y_true)
+    print(f"average precision (AP) score of {ap_score:.6f} (chance level is {chance_ap:.6f})")
+    input_dict = {"y_true": y_true.reshape(-1, 1) if batch.y.shape[1] == 1 else y_true, "y_pred": y_pred.reshape(-1, 1) if batch.y.shape[1] == 1 else y_pred}
+    if save_model_results:
+        data = {
           'y_pred': y_pred.squeeze(),
           'y_true': y_true.squeeze()
-      }
-      # lookup smiles to add to CSV
-      if len(split_indices) > 0:
-          # we need the split indices to lookup the smiles
-          original_indices = [split_indices[idx] for idx in indices]
-          smiles = [smiles_list[idx] for idx in original_indices]
-          data["smiles"] = smiles
-      pd.DataFrame(data=data).to_csv('ogbg_graph_' + save_filename + '.csv', sep=',', index=False)
-  if plot_metrics:
-      # an error here about `plot_chance_level` likely indicates scikit-learn dependency is not >=1.3
-      RocCurveDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-      using_graphnorm_filename_string = "_and_GraphNorm" if config['use_graph_norm'] else ""
-      using_graphnorm_title_string = " with GraphNorm" if config['use_graph_norm'] else ""
-      target_description = "West Nile Virus NS2bNS3 Proteinase" if int(args.aid_id) == 577 else ("Flavivirus Genome Capping Enzyme" if int(args.aid_id) == 588689 else "the target")
-      target_description_filename = "WNV_NS2bNS3_Proteinase_Inhibition" if int(args.aid_id) == 577 else ("Flavivirus_Genome_Capping_Enzyme_Inhibition" if int(args.aid_id) == 588689 else "target_inhibition")
-      plt.title(f"Predicting if molecules inhibit {target_description}\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
-      if figure_save_tag != "":
-          figure_save_tag = f"_{figure_save_tag}"
-      rocauc_figure_filename = f"{target_description_filename}_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE{figure_save_tag}.png"
-      plt.savefig(rocauc_figure_filename)
-      rocauc_score = roc_auc_score(y_true, y_pred)
-      print(f"Generated {rocauc_figure_filename}\nshowing Receiver Operating Characteristic Area Under the Curve (ROCAUC) score of {rocauc_score:.6f} (chance level is {0.5:.6f})")
-      plt.show()
-      PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
-      plt.title(f"Predicting if molecules inhibit {target_description}\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
-      precision_recall_display_filename = f"{target_description_filename}_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE{figure_save_tag}.png"
-      plt.legend(loc="upper right")
-      plt.savefig(precision_recall_display_filename)
-      ap_score = average_precision_score(y_true, y_pred)
-      chance_ap = y_true.sum()/len(y_true)
-      print(f"Generated {precision_recall_display_filename}\nshowing average precision (AP) score of {ap_score:.6f} (chance level is {chance_ap:.6f})")
-      plt.show()
-  return evaluator.eval(input_dict)
+        }
+        # lookup smiles to add to CSV
+        if len(split_indices) > 0:
+            # we need the split indices to lookup the smiles
+            original_indices = [split_indices[idx] for idx in indices]
+            smiles = [smiles_list[idx] for idx in original_indices]
+            data["smiles"] = smiles
+        pd.DataFrame(data=data).to_csv('ogbg_graph_' + save_filename + '.csv', sep=',', index=False)
+    if plot_metrics:
+        # an error here about `plot_chance_level` likely indicates scikit-learn dependency is not >=1.3
+        RocCurveDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
+        using_graphnorm_filename_string = "_and_GraphNorm" if config['use_graph_norm'] else ""
+        using_graphnorm_title_string = " with GraphNorm" if config['use_graph_norm'] else ""
+        target_description = "West Nile Virus NS2bNS3 Proteinase" if int(args.aid_id) == 577 else ("Flavivirus Genome Capping Enzyme" if int(args.aid_id) == 588689 else "the target")
+        target_description_filename = "WNV_NS2bNS3_Proteinase_Inhibition" if int(args.aid_id) == 577 else ("Flavivirus_Genome_Capping_Enzyme_Inhibition" if int(args.aid_id) == 588689 else "target_inhibition")
+        plt.title(f"Predicting if molecules inhibit {target_description}\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
+        if figure_save_tag != "":
+            figure_save_tag = f"_{figure_save_tag}"
+        rocauc_figure_filename = f"{target_description_filename}_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_ROC_CURVE{figure_save_tag}.png"
+        plt.savefig(rocauc_figure_filename)
+        rocauc_score = roc_auc_score(y_true, y_pred)
+        print(f"Generated {rocauc_figure_filename}\nshowing Receiver Operating Characteristic Area Under the Curve (ROCAUC) score of {rocauc_score:.6f} (chance level is {0.5:.6f})")
+        plt.show()
+        PrecisionRecallDisplay.from_predictions(y_true, y_pred, plot_chance_level=True)
+        plt.title(f"Predicting if molecules inhibit {target_description}\n{sum(p.numel() for p in best_model.parameters())} parameter {config['num_layers']}-hop GIN{using_graphnorm_title_string} and hidden dimension {config['hidden_dim']}")
+        precision_recall_display_filename = f"{target_description_filename}_Prediction_using_{config['num_layers']}-hop_GIN_hidden_dim_{config['hidden_dim']}{using_graphnorm_filename_string}_PRC_CURVE{figure_save_tag}.png"
+        plt.legend(loc="upper right")
+        plt.savefig(precision_recall_display_filename)
+        ap_score = average_precision_score(y_true, y_pred)
+        chance_ap = y_true.sum()/len(y_true)
+        print(f"Generated {precision_recall_display_filename}\nshowing average precision (AP) score of {ap_score:.6f} (chance level is {chance_ap:.6f})")
+        plt.show()
+    return evaluator.eval(input_dict)
 
 model = GINGraphPropertyModel(config['hidden_dim'], dataset.num_tasks, config['num_layers'], config['dropout']).to(device)
 print(f"parameter count: {sum(p.numel() for p in model.parameters())}")
@@ -332,40 +338,42 @@ best_valid_metric_at_save_checkpoint = 0
 best_train_metric_at_save_checkpoint = 0
 
 for epoch in range(1, 1 + config["epochs"]):
-  if epoch == 10:
-    # reduce learning rate at this point
-    optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate']*0.5, weight_decay=config['weight_decay'])
-  loss = train(model, device, train_loader, optimizer, loss_fn)
-  train_perf = eval(model, device, train_loader, evaluator)
-  val_perf = eval(model, device, valid_loader, evaluator)
-  #test_perf = eval(model, device, test_loader, evaluator)
-  train_metric, valid_metric = train_perf[dataset.eval_metric], val_perf[dataset.eval_metric]#, test_perf[dataset.eval_metric]
-  if valid_metric >= best_valid_metric_at_save_checkpoint and train_metric >= best_train_metric_at_save_checkpoint:
-    print(f"New best validation score: {valid_metric} ({dataset.eval_metric}) without training score regression")
-    best_valid_metric_at_save_checkpoint = valid_metric
-    best_train_metric_at_save_checkpoint = train_metric
-    best_model = copy.deepcopy(model)
-  print(f'Dataset {config["dataset_id"]}, '
-    f'Epoch: {epoch}, '
-    f'Train: {train_metric:.6f} ({dataset.eval_metric}), '
-    f'Valid: {valid_metric:.6f} ({dataset.eval_metric}), '
-    #f'Test: {test_metric:.6f} ({dataset.eval_metric})'
-   )
+    if epoch == 10:
+        # reduce learning rate at this point
+        optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate']*0.5, weight_decay=config['weight_decay'])
+    loss = train(model, device, train_loader, optimizer, loss_fn)
+    train_perf = eval(model, device, train_loader, evaluator)
+    val_perf = eval(model, device, valid_loader, evaluator)
+    train_metric, valid_metric = train_perf[dataset.eval_metric], val_perf[dataset.eval_metric]
+    if valid_metric >= best_valid_metric_at_save_checkpoint and train_metric >= best_train_metric_at_save_checkpoint:
+        print(f"New best validation score: {valid_metric} ({dataset.eval_metric}) without training score regression")
+        best_valid_metric_at_save_checkpoint = valid_metric
+        best_train_metric_at_save_checkpoint = train_metric
+        best_model = copy.deepcopy(model)
+    print(f'Dataset {config["dataset_id"]}, '
+          f'Epoch: {epoch}, '
+          f'Train: {train_metric:.6f} ({dataset.eval_metric}), '
+          f'Valid: {valid_metric:.6f} ({dataset.eval_metric})'
+    )
 
 with open(f"best_{config['dataset_id']}_gin_model_{config['num_layers']}_layers_{config['hidden_dim']}_hidden.pkl", "wb") as f:
   pickle.dump(best_model, f)
 
 train_metric = eval(best_model, device, train_loader, evaluator)[dataset.eval_metric]
 valid_metric = eval(best_model, device, valid_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_valid", split_indices=valid_split, plot_metrics=True, figure_save_tag="valid")[dataset.eval_metric]
+test_metric = None
+if args.eval_on_test_set:
+    test_metric = eval(best_model, device, test_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_test", split_indices=test_split, plot_metrics=True, figure_save_tag="test")[dataset.eval_metric]
+
 if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check:
     dev_metric = eval(best_model, device, dev_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_train_split_holdout_as_dev", split_indices=dev_split, plot_metrics=True, figure_save_tag="train_subset_holdout_as_dev")[dataset.eval_metric]
-
-#test_metric  = eval(best_model, device, test_loader, evaluator, save_model_results=True, save_filename=f"gin_{config['dataset_id']}_test", split_indices=split_idx["test"])[dataset.eval_metric]
 
 print(f'Best model for {config["dataset_id"]} (eval metric {dataset.eval_metric}): '
       f'Train: {train_metric:.6f}, '
       f'Valid: {valid_metric:.6f} ')
-      #f'Test: {test_metric:.6f}')
+
 if args.hold_out_addl_data_from_train_set_as_dev_for_addl_generalization_check:
     print(f"Train subset held out as dev for generalization check: {dev_metric:.6f}")
+if args.eval_on_test_set:
+    print(f'Best model for {config["dataset_id"]} (eval metric {dataset.eval_metric}) on the test set was: {test_metric:.6f}')
 print(f"parameter count: {sum(p.numel() for p in best_model.parameters())}")
