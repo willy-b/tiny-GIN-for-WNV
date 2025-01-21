@@ -27,7 +27,7 @@ argparser.add_argument("--aid_id", type=str, default='588689')
 # Set this to 'cpu' if you NEED to reproduce exact numbers.
 argparser.add_argument("--device", type=str, default='cpu')
 argparser.add_argument("--num_layers", type=int, default=2)
-argparser.add_argument("--hidden_dim", type=int, default=64) # set default to configuration with good balance of performance on validation (dim=8 is recommended for quick checks and for testing on new datasets)
+argparser.add_argument("--hidden_dim", type=int, default=64) # set default to configuration with good balance of performance on validation (dim=8 is recommended for PCBA 577, quick checks and for testing on new datasets; we are focusing on PCBA 588689 by default which has sufficient data for 64d model)
 argparser.add_argument("--learning_rate", type=float, default=0.001)
 # 5e-3 is a good starting value for grad_norm_clip_max_value for this problem (large effect during early steps right after weight initialization, much smaller effect later in training), however trying to avoid having too many hyperparameters and this is less important, if there is large variance between random seeds depending on initialization, this may help.
 # One can request access to e.g. https://colab.research.google.com/drive/10HPg51Sv27FJjzWQqNzqRpT0WuLYmHzy to see logged max and median gradient norm values before and after clipping throughout a training run.
