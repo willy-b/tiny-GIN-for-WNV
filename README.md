@@ -140,7 +140,7 @@ https://colab.research.google.com/drive/1fCrvEImy8FxB06pKd91NLMlnYAYJAY3y
 
 https://colab.research.google.com/drive/1QPyJK8Q7b6xxQaV8LIIcAw1p-xKNHD-w
 
-(results pending)
+(tiny GIN 32K parameter statistically significantly beats OGB GCN w/out virtual node 528K parameter on ROCAUC and AP)
 
 ##### OGB Team GCN w/ virtual node baseline (1,979,101 parameters) on PCBA AID 588689 "Flavivirus Genomic Capping Enzyme Inhibition"
 
