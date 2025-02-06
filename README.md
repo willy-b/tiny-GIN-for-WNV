@@ -72,12 +72,14 @@ python main_gin.py --aid_id 588689 --random_seed 0 --use_scaffold_split --epochs
 
 For AID 577 due to the extremely low data quantity (especially active molecules), using gradient norm clipping per code comments and a smaller hidden dim of 8 is recommended.
 
-**Note that the output CSV y_pred column values are raw unnormalized logit values, unlike the 0 or 1 y_true column values.**
+**Note that the output CSV y_pred column values are raw unnormalized logit values, 
+unlike the 0 or 1 y_true column values.**
 
-So for a row with the y_true column equal to 0 (negative class), ideally y_pred is a very small, e.g. very negative number, but for a row with the y_true column equal to 1, q
-y_pred should be larger, e.g. approaching zero if most numbers are negative.
+So for a row with the y_true column equal to 0 (negative class), ideally y_pred is a very small, e.g. very negative number, but for a row with the y_true column equal to 1 (positive class),
+y_pred should be larger, e.g. could be approaching zero instead of negative if most values are negative (not required to be <= 0 but often is due to class imbalance of the problem).
 
-**For classification/ranking, what matters is that the positive y_true equal 1 class have higher y_pred scores than the negative y_true equal 0 class.**
+**For classification/ranking, what matters is that the positive y_true equal 1 class has higher y_pred scores than the negative y_true equal 0 class (ideally there would be a single threshold that separates them).**
+
 The probability that this is true for randomly chosen pairs of positive and negative class examples actually corresponds to the reported Receiver Operating Characteristic Area Under the Curve score. For example, a 90% ROCAUC score indicates, among other things, that 90% of the time for randomly chosen pairs of positive and negative class examples the positive y_true equal to 1 example would have a y_pred score greater than the y_pred score of the negative y_true equal to 0 half of the pair.
 
 
