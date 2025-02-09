@@ -5,6 +5,7 @@ import pandas as pd
 import os
 
 # only need to run this once when setting up your workspace
+# defaults to original dataset aid 577 if not specified but upstream caller could also pass 588689
 def convert_aid_into_ogb_dataset(use_scaffold_split=False, scaffold_split_seed=0, aid_id=577):
    if int(aid_id) != 577 and int(aid_id) != 588689:
       raise Exception("unsupported AID ID; must be 577 or 588689 at present")
@@ -65,6 +66,7 @@ def convert_aid_into_ogb_dataset(use_scaffold_split=False, scaffold_split_seed=0
          random_perm_idx = np.random.permutation([idx for idx in range(len(graphs))])
          permuted_smiles = [smiles_used[idx] for idx in random_perm_idx]
          permuted_Ys = [Ys[idx] for idx in random_perm_idx]
+         # next line's variable name is out of date, scoped to these two consecutive lines, not specific to any particular AID number (could be pcba_aid_deepchem_dataset_without_features)
          pcba_aid_577_deepchem_dataset_without_features = dc.data.DiskDataset.from_numpy(X=Xs,y=permuted_Ys,w=np.zeros(len(graphs)),ids=permuted_smiles)
          train_split, val_split, test_split = scaffoldsplitter.split(pcba_aid_577_deepchem_dataset_without_features, frac_train, frac_valid, frac_test, seed=scaffold_split_seed)
          train_split = random_perm_idx[train_split]
@@ -104,10 +106,10 @@ def convert_aid_into_ogb_dataset(use_scaffold_split=False, scaffold_split_seed=0
    # regardless of split, set same task info
    ds.save_task_info("classification", "rocauc", num_classes=2)
 
-   # recall we are creating a local unofficial dataset so we can test PCBA AID 577 with code written to work with OGB formatted datasets but I don't actually intend to put PCBA AID 577 into OGB, so no mapping dir is required, however the OGB code requires this step is run
+   # recall we are creating a local unofficial dataset so we can test PCBA AID 577 or PCBA AID 588689 with code written to work with OGB formatted datasets but we have not actually submitted either of these new datasets into OGB, so no mapping dir is required, however the OGB code requires this step is run
    os.mkdir("dummy_mapping_dir")
    with open("dummy_mapping_dir/README.md", "w") as f:
-      f.write("The mapping here is not used: This is a local unofficial dataset so we can test PCBA AID 577 with code written to work with OGB formatted datasets but we do not actually intend to submit this PCBA AID 577 dataset for consideration with OGB at this time, so no mapping dir is required, however the OGB code requires that this mapping folder and this README.md exist.")
+      f.write("The mapping here is not used: This is a local unofficial dataset so we can test PCBA AID 577 or PCBA AID 588689 with code written to work with OGB formatted datasets but we have not submitted this PCBA AID 577 or PCBA AID 588689 derived dataset for consideration with OGB yet at this time, so no mapping dir is required, however the OGB code requires that this mapping folder and this README.md exist.")
       f.close()
    ds.copy_mapping_dir("dummy_mapping_dir")
    os.remove("dummy_mapping_dir/README.md")
@@ -115,5 +117,6 @@ def convert_aid_into_ogb_dataset(use_scaffold_split=False, scaffold_split_seed=0
 
    meta_dict = ds.get_meta_dict()
    print(f"meta_dict: {meta_dict}")
+   # example for PCBA AID 577 would be:
    #{'version': 0, 'dir_path': 'ogbg_pcba_aid_577_ogbg_pcba_aid_577/pcba_aid_577', 'binary': 'True', 'num tasks': 1, 'num classes': 2, 'task type': 'classification', 'eval metric': 'rocauc', 'add_inverse_edge': 'False', 'split': 'random-80-10-10', 'download_name': 'pcba_aid_577', 'url': 'https://snap.stanford.edu/ogb/data/graphproppred/pcba_aid_577.zip', 'has_node_attr': 'True', 'has_edge_attr': 'True', 'additional node files': 'None', 'additional edge files': 'None', 'is hetero': 'False'}
    return meta_dict

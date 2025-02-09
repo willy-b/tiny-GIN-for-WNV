@@ -21,6 +21,8 @@ https://pubchem.ncbi.nlm.nih.gov/bioassay/588689
 
 ![PubChem BioAssay AID 588689 - Primary and Confirmatory Screening for Flavivirus Genomic Capping Enzyme Inhibition](pcba_aid_588689_description_snippet.png)
 
+Test set (scaffold split, seed 0) results available at https://colab.research.google.com/drive/1-xdSl71kmMhC76ha7S5kbhkrI27_h6a0?usp=sharing .
+
 #### (2) PCBA AID 577: "HTS to identify Inhibitors of West Nile Virus NS2bNS3 Proteinase" (**SMALL DATASET SIZE**)
 
 as such NS2bNS3 protease inhibitors as they were considered likely at the time of that datasets publication to be WNV antiviral drug candidates
@@ -51,8 +53,6 @@ NOTE THERE ARE NO COMPETITIONS ASSOCIATED WITH THESE DATASETS THAT I AM AWARE OF
 
 # Trying it out
 
-(work in progress, no official statistics available yet, splits are randomized per run, and reporting on test split is disabled by hand for now)
-
 1. Install dependencies (run `install_dependencies.sh` this comes with or commands below):
 
 ```
@@ -64,20 +64,35 @@ pip install ogb # I'm using 1.3.6 right now
 
 2. Run this script `python main_gin.py --use_scaffold_split` (I'm using python 3.10.12 but should be flexible)
 
-Default hyperparameters are chosen to result in an extremely tiny model (for a quick check) that does ok for both datasets, but for AID 588689 one can do better with:
+For AID 588689 one can do well with (below will train and evaluate on the validation set):
 
 ```
 python main_gin.py --aid_id 588689 --random_seed 0 --use_scaffold_split --epochs 50 --hidden_dim 64 --weight_decay 1e-6 --batch_size 128
 ```
 
-# Example recent output/performance (validation split, not test)
+For AID 577 due to the extremely low data quantity (especially active molecules), using gradient norm clipping per code comments and a smaller hidden dim of 8 is recommended.
+
+**Note that the output CSV y_pred column values are raw unnormalized logit values, 
+unlike the 0 or 1 y_true column values.**
+
+So for a row with the y_true column equal to 0 (negative class), ideally y_pred is a very small, e.g. very negative number, but for a row with the y_true column equal to 1 (positive class),
+y_pred should be larger, e.g. could be approaching zero instead of negative if most values are negative (not required to be <= 0 but often is due to class imbalance of the problem).
+
+**For classification/ranking, what matters is that the positive y_true equal 1 class has higher y_pred scores than the negative y_true equal 0 class (ideally there would be a single threshold that separates them).**
+
+The probability that this is true for randomly chosen pairs of positive and negative class examples actually corresponds to the reported Receiver Operating Characteristic Area Under the Curve score. For example, a 90% ROCAUC score indicates, among other things, that 90% of the time for randomly chosen pairs of positive and negative class examples the positive y_true equal to 1 example would have a y_pred score greater than the y_pred score of the negative y_true equal to 0 half of the pair.
+
+
+# Validation and test results
 
 32,449 parameter model, using 9 atom features only
 2-layer 64-hidden dimension GIN with post-graph embed MLP, batch size 128, 1e-6 weight decay, and GraphNorm
 
 (same exact hyperparameter configuration as I used in 2024 July for ogbg-molhiv competition except batch size increased from 32 to 128 and added GraphNorm instead of BatchNorm)
 
-For performance across 10 seeds, see https://colab.research.google.com/drive/17JILSAkHj4IvKIpksBpjD0yrSyIVGZTv 
+### Validation set example
+
+For validation performance across 10 seeds, see https://colab.research.google.com/drive/17JILSAkHj4IvKIpksBpjD0yrSyIVGZTv .
 
 ```
 # but you can also reproduce the results with e.g.
@@ -86,9 +101,54 @@ python main_gin.py --aid_id 588689 --random_seed 0 --use_scaffold_split --epochs
 
 Seed 1 I include ROC and PRC curves here but see notebook for details:
 
-![PubChem BioAssay AID 588689 - Primary and Confirmatory Screening for Flavivirus Genomic Capping Enzyme Inhibition - Tiny GIN 64d with GraphNorm - ROC Curve - seed 1](example_Flaviviral_Genomic_Capping_Enzyme_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_64_and_GraphNorm_ROC_CURVE.png)
+![PubChem BioAssay AID 588689 - Primary and Confirmatory Screening for Flavivirus Genomic Capping Enzyme Inhibition - Tiny GIN 64d with GraphNorm - ROC Curve - seed 1 - validation set](example_Flaviviral_Genomic_Capping_Enzyme_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_64_and_GraphNorm_ROC_CURVE_validation_set.png)
 
-![PubChem BioAssay AID 588689 - Primary and Confirmatory Screening for Flavivirus Genomic Capping Enzyme Inhibition - Tiny GIN 64d with GraphNorm - PRC Curve - seed 1](example_Flaviviral_Genomic_Capping_Enzyme_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_64_and_GraphNorm_PRC_CURVE.png)
+![PubChem BioAssay AID 588689 - Primary and Confirmatory Screening for Flavivirus Genomic Capping Enzyme Inhibition - Tiny GIN 64d with GraphNorm - PRC Curve - seed 1 - validation set](example_Flaviviral_Genomic_Capping_Enzyme_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_64_and_GraphNorm_PRC_CURVE_validation_set.png)
+
+### Test set example (having completed hyperparameter search, first run on test)
+
+For test set performance across 10 seeds, see https://colab.research.google.com/drive/1-xdSl71kmMhC76ha7S5kbhkrI27_h6a0 .
+
+```
+# but you can also reproduce the results with e.g.
+python main_gin.py --aid_id 588689 --random_seed 0 --eval_on_test_set --use_scaffold_split --epochs 50 --hidden_dim 64 --weight_decay 1e-6 --batch_size 128
+```
+
+Seed 0 I include ROC and PRC curves here but see notebook for details:
+
+![PubChem BioAssay AID 588689 - Primary and Confirmatory Screening for Flavivirus Genomic Capping Enzyme Inhibition - Tiny GIN 64d with GraphNorm - ROC Curve - seed 0 - validation set](example_Flaviviral_Genomic_Capping_Enzyme_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_64_and_GraphNorm_ROC_CURVE_test_set.png)
+
+![PubChem BioAssay AID 588689 - Primary and Confirmatory Screening for Flavivirus Genomic Capping Enzyme Inhibition - Tiny GIN 64d with GraphNorm - PRC Curve - seed 0 - validation set](example_Flaviviral_Genomic_Capping_Enzyme_Inhibition_Prediction_using_2-hop_GIN_hidden_dim_64_and_GraphNorm_PRC_CURVE_test_set.png)
+
+### Comparisons with OGB Team baseline model configurations
+
+These are baselines from the recommended baseline models per OGB guidelines for baselines to run when proposing new datasets at https://docs.google.com/document/u/0/d/e/2PACX-1vS1hBTYLONRwAU9UxK42USTuRKrt_Yk4H0EhpLvJC_eOrGxbJUtrzDqlIStAFpnwZt2N28B3MuSxgqj/pub?pli=1 (from ogb.stanford.edu public links) which recommend using the baselines from their paper Hu, Weihua, et al. "Open graph benchmark: Datasets for machine learning on graphs." Advances in neural information processing systems 33 (2020): 22118-22133 ( https://arxiv.org/abs/2005.00687 ).
+
+Note the document above is linked from the public ogb.stanford.edu "Dataset overview" page, subsection "Contributing Datasets" ( https://web.archive.org/web/20241220083832/https://ogb.stanford.edu/docs/dataset_overview/ ).
+
+##### OGB Team GIN baseline (1,885,506 parameters) on PCBA AID 588689 "Flavivirus Genomic Capping Enzyme Inhibition"
+
+https://colab.research.google.com/drive/18fwSQ4CzsDOZmcqUBlJc1S3ytvxxUwGt
+
+(tiny GIN 32K parameter statistically significantly beats OGB GIN 1.8M parameter on ROCAUC and AP)
+
+##### OGB Team GIN w/ virtual node baseline (3,336,606 parameters) on PCBA AID 588689 "Flavivirus Genomic Capping Enzyme Inhibition"
+
+https://colab.research.google.com/drive/1fCrvEImy8FxB06pKd91NLMlnYAYJAY3y
+
+(tiny GIN 32K parameter statistically significantly beats OGB GIN w/ virtual node 3.3M parameter on ROCAUC; beats on AP but may not be statistically significant)
+
+##### OGB Team GCN baseline (528,001 parameters) on PCBA AID 588689 "Flavivirus Genomic Capping Enzyme Inhibition"
+
+https://colab.research.google.com/drive/1QPyJK8Q7b6xxQaV8LIIcAw1p-xKNHD-w
+
+(tiny GIN 32K parameter statistically significantly beats OGB GCN w/out virtual node 528K parameter on ROCAUC and AP)
+
+##### OGB Team GCN w/ virtual node baseline (1,979,101 parameters) on PCBA AID 588689 "Flavivirus Genomic Capping Enzyme Inhibition"
+
+https://colab.research.google.com/drive/1R16OFpIusMD5pBbmMQh0WZFHip6_XbIb
+
+(tiny GIN 32K parameter statistically significantly beats OGB GCN w/ virtual node 1.98M parameter on ROCAUC; beats on AP but may not be statistically significant)
 
 # References
 
