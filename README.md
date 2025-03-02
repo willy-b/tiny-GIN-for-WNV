@@ -2,6 +2,8 @@
 
 **WORK IN PROGRESS REPO, NOT FOR ANY COMPETITION**
 
+**NEW**: Report in progress on using the Tiny GIN and other GNN baselines to predict the PCBA 588689 dataset here at https://raw.githubusercontent.com/willy-b/tiny-GIN-for-WNV/add-early-draft-of-report-on-pcba-588689/gnns-to-predict-flaviviral-genomic-capping-enzyme-inhibition.pdf .
+
 ### Description 
 
 Trying to apply a similar network to https://github.com/willy-b/tiny-GIN-for-ogbg-molhiv/ to West Nile Virus related datasets.
