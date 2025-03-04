@@ -2,7 +2,7 @@
 
 **WORK IN PROGRESS REPO, NOT FOR ANY COMPETITION**
 
-**NEW**: Report in progress on using the Tiny GIN and other GNN baselines to predict the PCBA 588689 dataset here at https://raw.githubusercontent.com/willy-b/tiny-GIN-for-WNV/add-early-draft-of-report-on-pcba-588689/gnns-to-predict-flaviviral-genomic-capping-enzyme-inhibition.pdf .
+**NEW**: Report in progress on using the Tiny GIN and other GNN baselines to predict the PCBA 588689 dataset here at https://raw.githubusercontent.com/willy-b/tiny-GIN-for-WNV/initial-draft-branch/gnns-to-predict-flaviviral-genomic-capping-enzyme-inhibition.pdf .
 
 ### Description 
 
