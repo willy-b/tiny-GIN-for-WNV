@@ -55,13 +55,11 @@ NOTE THERE ARE NO COMPETITIONS ASSOCIATED WITH THESE DATASETS THAT I AM AWARE OF
 
 # Trying it out
 
-1. Install dependencies (run `install_dependencies.sh` this comes with or commands below):
+1. Install dependencies (run `install_dependencies.sh`)
 
 ```
-pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-2.2.1+cu121.html
-pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-2.2.1+cu121.html
-pip install torch-geometric # I'm using 2.5.3 right now
-pip install ogb # I'm using 1.3.6 right now
+chmod +x install_dependencies.sh
+./install_dependencies.sh
 ```
 
 2. Run this script `python main_gin.py --use_scaffold_split` (I'm using python 3.10.12 but should be flexible)
