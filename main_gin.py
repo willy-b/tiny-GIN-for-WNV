@@ -40,7 +40,6 @@ argparser.add_argument("--random_seed", type=int, default=None)
 argparser.add_argument("--random_seed_for_data_splits", type=int, default=None) # default uses 0 but resplits if set explicitly
 argparser.add_argument("--use_scaffold_split", action="store_true")
 argparser.add_argument("--use_random_split", action="store_true")
-#argparser.add_argument("--hide_test_metric", action="store_true") # always hidden as still doing hyperparameter search at this stage
 # Optionally, allow reweighting of loss to account for class imbalance.
 # Default of 1.0 has no effect,
 # setting to 1/active_molecule_prevalence would encourage recall of active molecules same as inactive at cost of precision.
